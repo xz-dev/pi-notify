@@ -63,7 +63,7 @@ export function createOscLauncher(options: OscLauncherOptions) {
       const sequences = environment.KITTY_WINDOW_ID
         ? [`\x1b]99;i=pi-notify:d=0;${title}\x1b\\`, `\x1b]99;i=pi-notify:p=body;${body}\x1b\\`]
         : environment.TERM_PROGRAM === "iTerm.app" || environment.ITERM_SESSION_ID
-          ? [`\x1b]9;${body}\x07`]
+          ? [`\x1b]9;${title}: ${body}\x07`]
           : [`\x1b]777;notify;${title};${body}\x07`];
       for (const sequence of sequences) write(tmuxPassthrough(sequence, environment));
     } catch (error) {

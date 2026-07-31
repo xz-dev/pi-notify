@@ -18,7 +18,12 @@ test("templates use command-context names and preserve unavailable placeholders"
 test("command launcher overlays fixed event context without leaking tool arguments", () => {
   const calls: Array<{ command: string; options: unknown }> = [];
   const launch = createCommandLauncher({
-    inheritedEnvironment: { PATH: "/bin", PI_NOTIFY_TOOL: "stale" },
+    inheritedEnvironment: {
+      PATH: "/bin",
+      PI_NOTIFY_TOOL: "stale",
+      PI_NOTIFY_ARGS: "stale-secret",
+      pi_notify_custom: "stale-custom",
+    },
     spawn: (command, options) => {
       calls.push({ command, options });
       return { once: () => undefined, unref: () => undefined };
@@ -72,6 +77,22 @@ test("osc launcher chooses protocol and wraps escape sequences for tmux", () => 
   assert.equal(writes.length, 2);
   assert.match(writes[0] ?? "", /^\x1bPtmux;/);
   assert.match(writes[0] ?? "", /\x1b\x1b\]99;/);
+});
+
+test("iTerm2 includes both the title and body", () => {
+  const writes: string[] = [];
+  const launch = createOscLauncher({
+    environment: { TERM_PROGRAM: "iTerm.app" },
+    write: (value) => writes.push(value),
+    spawnWindowsToast: () => {
+      throw new Error("unexpected Windows toast");
+    },
+    warn: () => undefined,
+  });
+
+  launch("Custom title", "Custom body");
+
+  assert.deepEqual(writes, ["\x1b]9;Custom title: Custom body\x07"]);
 });
 
 test("Windows Terminal uses a fire-and-forget toast process", () => {
