@@ -17,11 +17,11 @@
 - [x] Prove the acceptance test fails before production implementation.
 - [x] Implement config loading, event routing, terminal protocols, and command launch.
 - [x] Run typecheck and tests; commit the functional slice.
-- [ ] Obtain independent reviewer approval and address findings.
-- [ ] Merge the functional branch.
+- [x] Obtain independent reviewer approval and address findings.
+- [x] Merge the functional branch.
 
 ## Release documentation
 
-- [ ] Add README, example configuration, environment reference, and MIT license in a documentation-only commit.
+- [x] Add README, example configuration, environment reference, and MIT license in a documentation-only commit.
 - [ ] Verify the final package from a clean install.
 - [ ] Create and push public `xz-dev/pi-notify` GitHub repository.
