@@ -108,10 +108,10 @@ Pi currently exposes no public project-name field to extensions, so `PI_NOTIFY_P
 | Kitty | Yes | OSC 99 |
 | tmux | Conditional | Passthrough around the selected OSC protocol |
 | Windows Terminal | Yes | PowerShell toast |
-| Terminal.app | No | No notification protocol supported by this extension |
-| Alacritty | No | No notification protocol supported by this extension |
+| Terminal.app | No | OSC 777 fallback is emitted, but Terminal.app does not display it |
+| Alacritty | No | OSC 777 fallback is emitted, but Alacritty does not display it |
 
-Unknown terminals receive the OSC 777 fallback. Inside tmux, enable passthrough:
+Unknown terminals receive the OSC 777 fallback; whether it is displayed depends on terminal support. Inside tmux, enable passthrough:
 
 ```tmux
 set -g allow-passthrough on
