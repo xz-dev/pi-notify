@@ -6,6 +6,7 @@ import {
   type NotificationAction,
   type NotificationConfig,
   type NotificationKey,
+  type ShellTupleAction,
 } from "./types.js";
 
 interface LoadConfigOptions {
@@ -17,15 +18,39 @@ interface LoadConfigOptions {
 
 const notificationKeys = new Set<string>(NOTIFICATION_KEYS);
 
-function isAction(value: unknown): value is NotificationAction {
+export function isShellTupleAction(value: unknown): value is ShellTupleAction {
+  if (!Array.isArray(value) || value.length < 2) return false;
+  if (!value.every((item) => typeof item === "string")) return false;
+  const head = value[0]!;
+  if (!head.startsWith("shell:")) return false;
+  const interpreter = head.slice("shell:".length);
+  return interpreter.trim().length > 0;
+}
+
+function isStringAction(value: unknown): value is Exclude<NotificationAction, ShellTupleAction> {
   if (value === "osc") return true;
   if (typeof value !== "string") return false;
   if (value.startsWith("cmd:")) return value.slice(4).trim().length > 0;
+  if (value.startsWith("js:")) return value.slice(3).trim().length > 0;
+  // Obsolete string form shell:<interpreter>:<raw> is intentionally invalid.
+  if (value.startsWith("shell:")) return false;
   if (!value.startsWith("osc:")) return false;
 
   const template = value.slice(4);
   const separator = template.indexOf("|");
   return separator > 0 && separator < template.length - 1;
+}
+
+function isAction(value: unknown): value is NotificationAction {
+  return isStringAction(value) || isShellTupleAction(value);
+}
+
+export function parseShellTuple(action: ShellTupleAction): { interpreter: string; args: string[] } {
+  const head = action[0];
+  return {
+    interpreter: head.slice("shell:".length),
+    args: action.slice(1) as string[],
+  };
 }
 
 async function readConfig(path: string, warn: (message: string) => void): Promise<NotificationConfig> {

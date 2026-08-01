@@ -1,13 +1,9 @@
-import { TEMPLATE_KEYS, type NotificationEnvironment, type TemplateValues } from "./types.js";
-
-interface NotificationContext {
-  event: string;
-  cwd: string;
-  sessionId: string;
-  sessionFile?: string;
-  tool?: string;
-  toolCallId?: string;
-}
+import {
+  TEMPLATE_KEYS,
+  type NotificationContext,
+  type NotificationEnvironment,
+  type TemplateValues,
+} from "./types.js";
 
 export function createTemplateValues(context: NotificationContext): TemplateValues {
   return {
@@ -17,6 +13,8 @@ export function createTemplateValues(context: NotificationContext): TemplateValu
     ...(context.sessionFile === undefined ? {} : { SESSION_FILE: context.sessionFile }),
     ...(context.tool === undefined ? {} : { TOOL: context.tool }),
     ...(context.toolCallId === undefined ? {} : { TOOL_CALL_ID: context.toolCallId }),
+    ...(context.title === undefined ? {} : { TITLE: context.title }),
+    ...(context.content === undefined ? {} : { CONTENT: context.content }),
   };
 }
 

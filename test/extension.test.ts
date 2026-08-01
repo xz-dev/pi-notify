@@ -26,6 +26,7 @@ test("routes settled and ask-user events while ignoring other tools", async () =
     agentDir,
     launchOsc: (title, body) => launches.push({ type: "osc", value: `${title}|${body}` }),
     launchCommand: (command, _cwd, env) => launches.push({ type: "cmd", value: command, env }),
+    launchShell: () => undefined,
     warn: () => undefined,
   };
   const pi = {
