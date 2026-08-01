@@ -1,6 +1,6 @@
 # pi-notify
 
-Configurable, fire-and-forget notifications for [Pi](https://github.com/badlogic/pi-mono). Notify through terminal-native protocols, launch your own shell commands, or do both when Pi becomes idle or asks you a question.
+Configurable notifications for [Pi](https://github.com/badlogic/pi-mono). Notify through terminal-native protocols, launch commands through the platform shell or an explicit interpreter, run trusted JavaScript against Pi's public extension APIs, and optionally let the AI send a titled notification.
 
 Inspired by [ferologics/pi-notify](https://github.com/ferologics/pi-notify).
 
@@ -10,8 +10,10 @@ Inspired by [ferologics/pi-notify](https://github.com/ferologics/pi-notify).
 - Observes `ask_user_question` through `tool_execution_start` without blocking or modifying the tool call.
 - Loads global configuration plus optional trusted-project overrides.
 - Supports terminal notifications through Windows Terminal toast, Kitty OSC 99, iTerm2 OSC 9, and OSC 777, including tmux passthrough.
-- Runs arbitrary user-configured `cmd:` actions with notification context in `PI_NOTIFY_*` environment variables.
-- Treats both `osc` and `cmd:` actions as fire-and-forget. Failures do not block Pi or stop later actions from launching.
+- Preserves concise `cmd:` actions through the platform's default shell and supports `shell:` actions with an explicit interpreter.
+- Runs trusted `js:` actions in-process with access to Pi's public extension API, the event context, and the complete event object.
+- Optionally exposes `agent_notify({ title, content })` to the AI when the `pi_notify:agent_notify` hook has configured actions.
+- Keeps terminal and command actions fire-and-forget while awaiting JavaScript actions. One action failure does not prevent later actions from being attempted.
 
 ## Requirements
 
@@ -35,17 +37,22 @@ pi -e /path/to/pi-notify/index.ts
 
 ## Configuration
 
-The configuration is a JSON object from supported event keys to ordered arrays of actions:
+The configuration is a JSON object from supported event keys to ordered arrays of actions. Most actions are strings; an explicit-interpreter action is a flat tuple whose first item selects the interpreter and whose remaining items are exact arguments:
 
 ```json
 {
   "agent_settled": [
     "osc",
-    "cmd:paplay /usr/share/sounds/freedesktop/stereo/complete.oga"
+    "cmd:paplay /usr/share/sounds/freedesktop/stereo/complete.oga",
+    ["shell:/bin/bash", "-lc", "my-notify-script"]
   ],
   "tool_execution_start:ask_user_question": [
     "osc:Pi|{{TOOL}} needs your input in {{CWD}}",
-    "cmd:my-notify-script"
+    "js:ctx.ui.notify(`Question in ${notification.cwd}`, 'info')"
+  ],
+  "pi_notify:agent_notify": [
+    "osc:{{TITLE}}|{{CONTENT}}",
+    ["shell:powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Write-Output $env:PI_NOTIFY_CONTENT"]
   ]
 }
 ```
@@ -67,6 +74,7 @@ A missing file is an empty configuration. Invalid JSON, unsupported keys, and in
 | --- | --- |
 | `agent_settled` | Pi is idle with no automatic retry, compaction, or queued continuation left to run. |
 | `tool_execution_start:ask_user_question` | The `ask_user_question` tool starts executing. Other tools do not match. |
+| `pi_notify:agent_notify` | The optional `agent_notify` AI tool is called. The tool is exposed only when this key contains at least one valid action. |
 
 ### Actions
 
@@ -74,9 +82,11 @@ A missing file is an empty configuration. Invalid JSON, unsupported keys, and in
 | --- | --- |
 | `osc` | Send the event's built-in terminal notification. |
 | `osc:<title>|<body>` | Send a terminal notification with template-expanded title and body. Both sides of `|` must be non-empty. |
-| `cmd:<shell command>` | Launch the command through the platform shell with the current Pi cwd and notification environment. The command must be non-empty. |
+| `cmd:<shell command>` | Launch the command through the platform's default shell with the current Pi cwd and notification environment. The command must be non-empty. |
+| `["shell:<interpreter>", "arg1", ...]` | Resolve one explicit interpreter and launch it directly with the remaining strings as exact arguments. At least one argument is required. |
+| `js:<code>` | Await trusted JavaScript in the plugin process with `pi`, `ctx`, `event`, and `notification` in scope. The code must be non-empty. |
 
-Actions are launched in array order. Their completion order is not guaranteed, and their exit status is intentionally not awaited.
+Actions are started in array order and every action is attempted even if an earlier one fails. `osc`, `cmd:`, and `shell:` are fire-and-forget; command completion order and exit status are intentionally not observed. `js:` is awaited. Lifecycle-hook failures produce non-blocking warnings. `agent_notify` reports an aggregated tool error after all actions are attempted if JavaScript, synchronous OSC delivery, or synchronous process startup failed. Errors emitted later by a detached child remain warning-only.
 
 ## Templates and command environment
 
@@ -90,12 +100,52 @@ Actions are launched in array order. Their completion order is not guaranteed, a
 | `{{SESSION_FILE}}` | `PI_NOTIFY_SESSION_FILE` | Persistent sessions only |
 | `{{TOOL}}` | `PI_NOTIFY_TOOL` | Tool events only |
 | `{{TOOL_CALL_ID}}` | `PI_NOTIFY_TOOL_CALL_ID` | Tool events only |
+| `{{TITLE}}` | `PI_NOTIFY_TITLE` | `agent_notify` only |
+| `{{CONTENT}}` | `PI_NOTIFY_CONTENT` | `agent_notify` only |
 
-If a template value is unavailable, its placeholder is preserved literally. For example, `{{TOOL}}` remains `{{TOOL}}` during `agent_settled`.
+If a template value is unavailable, its placeholder is preserved literally. For example, `{{TOOL}}` remains `{{TOOL}}` during `agent_settled`. A bare `osc` action under `pi_notify:agent_notify` uses the tool's title and content.
 
-Pi currently exposes no public project-name field to extensions, so `PI_NOTIFY_PROJECT` is deliberately unset. The extension also removes all inherited `PI_NOTIFY_*` values before adding the current fixed context. Tool arguments—including question text—are never copied into the command environment.
+Pi currently exposes no public project-name field to extensions, so `PI_NOTIFY_PROJECT` is deliberately unset. The extension also removes all inherited `PI_NOTIFY_*` values before adding the current fixed context. Lifecycle tool arguments—including question text—are never copied into the command environment. A `js:` action intentionally receives the complete raw event, including tool arguments.
 
-`cmd:` uses the platform shell (`/bin/sh` on Unix-like systems and `ComSpec`/`cmd.exe` on Windows). Shell syntax is therefore platform-specific. Configuration files execute user-authored commands; only enable project configuration in directories you trust.
+`cmd:` uses the platform shell (`/bin/sh` on Unix-like systems and `ComSpec`/`cmd.exe` on Windows). It is the shorthand for users who want to write only the shell program and do not need to choose an interpreter.
+
+A `shell:` tuple bypasses the host shell and calls the interpreter directly with `shell: false`. pi-notify does not add `-c`, `/c`, `-Command`, or any other argument. It also does not split, join, expand, or otherwise reinterpret the argument strings. Supply every argument the chosen interpreter requires:
+
+```json
+{
+  "agent_settled": [
+    ["shell:/bin/bash", "-lc", "notify-send done"],
+    ["shell:powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Write-Output done"]
+  ]
+}
+```
+
+Pipes, redirections, variable expansion, and other shell syntax work only when the selected interpreter is explicitly asked to process them, such as `/bin/bash` with `-lc`. Otherwise each argument is passed literally. The spawned process receives the `PI_NOTIFY_*` environment independently of its arguments.
+
+Only the bare interpreter name `powershell.exe` (case-insensitive) is resolved automatically. On WSL, resolution checks `PATH`, then a `SystemRoot`/`WINDIR`-derived WSL path, then the standard path `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`. Explicit paths—including paths ending in `powershell.exe`—are preserved exactly. Windows Terminal toast notifications use the same bare-name resolver and fall back exactly once to terminal OSC when PowerShell cannot launch.
+
+`js:` compiles user-authored JavaScript as an async function. Its four lexical parameters are:
+
+| Name | Value |
+| --- | --- |
+| `pi` | The plugin's public Pi `ExtensionAPI`. |
+| `ctx` | The public `ExtensionContext` for the current lifecycle event or tool call. |
+| `event` | The complete event object. For `agent_notify`, this describes that tool invocation and includes its arguments. |
+| `notification` | Structured notification context: event key, cwd, session fields, tool fields, and title/content when available. |
+
+Because `js:` runs in the Pi process, it has the current user's full permissions and can call powerful Pi APIs. Global and trusted-project configuration are executable code; review them as carefully as an extension. Do not use `js:` for untrusted content.
+
+## AI notification tool
+
+The model-facing tool is disabled by default. It is registered as:
+
+```text
+agent_notify({ title: string, content: string })
+```
+
+Only a non-empty `pi_notify:agent_notify` action list containing at least one valid action enables it. A missing key, an empty array, or an array whose entries are all invalid leaves the tool unavailable to the AI. Trusted project configuration follows normal replacement precedence, so a project hook replaces the global hook for that project.
+
+The tool attempts every configured action before returning. It reports concise success when all awaited or synchronously launched actions succeed, or one aggregated Pi tool error when they do not. A fire-and-forget command that exits unsuccessfully later cannot be reflected in the tool result.
 
 ## Terminal support
 
