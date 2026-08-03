@@ -24,8 +24,21 @@ interface OscLauncherOptions {
   warn: (message: string) => void;
 }
 
-function safeText(value: string): string {
-  return value.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").replace(/;/g, ",");
+/** Normalize newlines and strip C0/C1 controls except LF (keeps multiline bodies). */
+function sanitizeText(value: string): string {
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/g, "");
+}
+
+/** OSC 9 / OSC 777 use ';' as a field delimiter — keep payload fields single-token. */
+function forDelimiterProtocol(value: string): string {
+  return value.replace(/;/g, ",");
+}
+
+function kittyBase64Payload(value: string): string {
+  return Buffer.from(value, "utf8").toString("base64");
 }
 
 function tmuxPassthrough(sequence: string, environment: NodeJS.ProcessEnv): string {
@@ -53,11 +66,22 @@ function writeOscSequences(
   environment: NodeJS.ProcessEnv,
   write: (value: string) => void,
 ): void {
-  const sequences = environment.KITTY_WINDOW_ID
-    ? [`\x1b]99;i=pi-notify:d=0;${title}\x1b\\`, `\x1b]99;i=pi-notify:p=body;${body}\x1b\\`]
-    : environment.TERM_PROGRAM === "iTerm.app" || environment.ITERM_SESSION_ID
-      ? [`\x1b]9;${title}: ${body}\x07`]
-      : [`\x1b]777;notify;${title};${body}\x07`];
+  let sequences: string[];
+  if (environment.KITTY_WINDOW_ID) {
+    // Official Kitty OSC 99: e=1 Base64 UTF-8 payload preserves LF safely.
+    sequences = [
+      `\x1b]99;i=pi-notify:d=0:e=1;${kittyBase64Payload(title)}\x1b\\`,
+      `\x1b]99;i=pi-notify:p=body:e=1;${kittyBase64Payload(body)}\x1b\\`,
+    ];
+  } else if (environment.TERM_PROGRAM === "iTerm.app" || environment.ITERM_SESSION_ID) {
+    const safeTitle = forDelimiterProtocol(title);
+    const safeBody = forDelimiterProtocol(body);
+    sequences = [`\x1b]9;${safeTitle}: ${safeBody}\x07`];
+  } else {
+    const safeTitle = forDelimiterProtocol(title);
+    const safeBody = forDelimiterProtocol(body);
+    sequences = [`\x1b]777;notify;${safeTitle};${safeBody}\x07`];
+  }
   for (const sequence of sequences) write(tmuxPassthrough(sequence, environment));
 }
 
@@ -125,8 +149,8 @@ export function createOscLauncher(options: OscLauncherOptions) {
   // Synchronous OSC write/spawn failures must surface to runActions (agent_notify aggregates them).
   // Lifecycle paths catch via runActions throwOnFailure=false.
   return (rawTitle: string, rawBody: string): void => {
-    const title = safeText(rawTitle);
-    const body = safeText(rawBody);
+    const title = sanitizeText(rawTitle);
+    const body = sanitizeText(rawBody);
 
     if (environment.WT_SESSION) {
       spawnWindowsToast(title, body);
