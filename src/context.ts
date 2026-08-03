@@ -1,30 +1,41 @@
 import {
-  TEMPLATE_KEYS,
+  SYSTEM_TEMPLATE_KEYS,
   type NotificationContext,
   type NotificationEnvironment,
   type TemplateValues,
 } from "./types.js";
 
+const systemKeySet = new Set<string>(SYSTEM_TEMPLATE_KEYS);
+
 export function createTemplateValues(context: NotificationContext): TemplateValues {
-  return {
+  const values: TemplateValues = {
     EVENT: context.event,
     CWD: context.cwd,
     SESSION_ID: context.sessionId,
-    ...(context.sessionFile === undefined ? {} : { SESSION_FILE: context.sessionFile }),
-    ...(context.tool === undefined ? {} : { TOOL: context.tool }),
-    ...(context.toolCallId === undefined ? {} : { TOOL_CALL_ID: context.toolCallId }),
-    ...(context.title === undefined ? {} : { TITLE: context.title }),
-    ...(context.content === undefined ? {} : { CONTENT: context.content }),
   };
+
+  if (context.hook !== undefined) values.HOOK = context.hook;
+  if (context.sessionFile !== undefined) values.SESSION_FILE = context.sessionFile;
+  if (context.tool !== undefined) values.TOOL = context.tool;
+  if (context.toolCallId !== undefined) values.TOOL_CALL_ID = context.toolCallId;
+
+  for (const [key, value] of Object.entries(context.values ?? {})) {
+    if (systemKeySet.has(key)) continue;
+    values[key] = value;
+  }
+
+  return values;
 }
 
 export function createNotificationEnvironment(context: NotificationContext): NotificationEnvironment {
   const values = createTemplateValues(context);
-  return Object.fromEntries(
-    TEMPLATE_KEYS.flatMap((key) => (values[key] === undefined ? [] : [[`PI_NOTIFY_${key}`, values[key]]])),
-  ) as NotificationEnvironment;
+  const environment: NotificationEnvironment = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined) environment[`PI_NOTIFY_${key}`] = value;
+  }
+  return environment;
 }
 
 export function renderTemplate(template: string, values: TemplateValues): string {
-  return template.replace(/\{\{([A-Z_]+)\}\}/g, (placeholder, key: string) => values[key as keyof TemplateValues] ?? placeholder);
+  return template.replace(/\{\{([A-Z_]+)\}\}/g, (placeholder, key: string) => values[key] ?? placeholder);
 }

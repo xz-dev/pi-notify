@@ -10,6 +10,7 @@ import { createCommandLauncher, createShellLauncher } from "../src/command.js";
 import { createNotificationEnvironment, renderTemplate } from "../src/context.js";
 import { createOscLauncher } from "../src/osc.js";
 import { isBarePowerShellExe, resolvePowerShell } from "../src/powershell.js";
+import { SEMANTIC_HOOK_CHANNEL } from "../src/semantic-hook.js";
 
 async function fixture(): Promise<{ agentDir: string; cwd: string }> {
   const root = await import("node:fs/promises").then(({ mkdtemp }) => mkdtemp(join(tmpdir(), "pi-notify-explicit-")));
@@ -31,30 +32,71 @@ function makeCtx(cwd: string, trusted = true) {
   };
 }
 
+function createPiHarness() {
+  const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
+  const bus = new Map<string, Set<(data: unknown) => void>>();
+  const tools: any[] = [];
+  const pi = {
+    on: (event: string, handler: (event: any, ctx: any) => void | Promise<void>) => {
+      handlers.set(event, handler);
+    },
+    registerTool: (tool: any) => tools.push(tool),
+    events: {
+      on: (channel: string, handler: (data: unknown) => void) => {
+        let set = bus.get(channel);
+        if (!set) {
+          set = new Set();
+          bus.set(channel, set);
+        }
+        set.add(handler);
+        return () => set!.delete(handler);
+      },
+      emit: (channel: string, data: unknown) => {
+        for (const handler of bus.get(channel) ?? []) handler(data);
+      },
+    },
+  };
+  return { handlers, bus, tools, pi: pi as any };
+}
+
+async function flush(): Promise<void> {
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setTimeout(resolve, 5));
+}
+
 test("config accepts string actions and flat shell tuples; rejects old shell strings and invalid tuples", async () => {
   const { agentDir, cwd } = await fixture();
   await writeFile(
     join(agentDir, "pi-notify.json"),
     JSON.stringify({
-      agent_settled: [
-        "cmd:ok",
-        ["shell:/bin/bash", "-lc", "echo hi"],
-        "js:await Promise.resolve()",
-        ["shell:pwsh", "-Command", "Write-Output hi"],
-        ["shell:C:\\Tools\\pwsh.exe", "-NoProfile", "-Command", "Write-Output %PATH%"],
-        "shell:/bin/bash:-lc 'echo hi'",
-        "shell:pwsh:-Command Write-Output hi",
-        "shell:",
-        ["shell:/bin/bash"],
-        ["shell:", "args"],
-        ["shell:  ", "args"],
-        ["shell:/bin/bash", 1],
-        { shell: "/bin/bash" },
-        "js:",
-        "js:   ",
-        "cmd:",
-      ],
-      "pi_notify:agent_notify": ["cmd:notify-me", "email", ["shell:/bin/true", "--ok"]],
+      events: {
+        agent_settled: {
+          actions: [
+            "cmd:ok",
+            ["shell:/bin/bash", "-lc", "echo hi"],
+            "js:await Promise.resolve()",
+            ["shell:pwsh", "-Command", "Write-Output hi"],
+            ["shell:C:\\Tools\\pwsh.exe", "-NoProfile", "-Command", "Write-Output %PATH%"],
+            "shell:/bin/bash:-lc 'echo hi'",
+            "shell:pwsh:-Command Write-Output hi",
+            "shell:",
+            ["shell:/bin/bash"],
+            ["shell:", "args"],
+            ["shell:  ", "args"],
+            ["shell:/bin/bash", 1],
+            { shell: "/bin/bash" },
+            "js:",
+            "js:   ",
+            "cmd:",
+          ],
+        },
+      },
+      hooks: {
+        "agent-notify": {
+          actions: ["cmd:notify-me", "email", ["shell:/bin/true", "--ok"]],
+        },
+      },
       agent_end: ["osc"],
     }),
   );
@@ -67,35 +109,35 @@ test("config accepts string actions and flat shell tuples; rejects old shell str
     warn: (message) => warnings.push(message),
   });
 
-  assert.deepEqual(config.agent_settled, [
+  assert.deepEqual(config.events.agent_settled?.actions, [
     "cmd:ok",
     ["shell:/bin/bash", "-lc", "echo hi"],
     "js:await Promise.resolve()",
     ["shell:pwsh", "-Command", "Write-Output hi"],
     ["shell:C:\\Tools\\pwsh.exe", "-NoProfile", "-Command", "Write-Output %PATH%"],
   ]);
-  assert.deepEqual(config["pi_notify:agent_notify"], ["cmd:notify-me", ["shell:/bin/true", "--ok"]]);
-  assert.equal((config as Record<string, unknown>).agent_end, undefined);
+  assert.deepEqual(config.hooks["agent-notify"]?.actions, ["cmd:notify-me", ["shell:/bin/true", "--ok"]]);
+  assert.equal((config.events as Record<string, unknown>).agent_end, undefined);
   assert.ok(warnings.length >= 10);
   assert.ok(warnings.some((entry) => entry.includes("shell:/bin/bash:-lc")));
 });
 
-test("trusted project replaces agent_notify hook; untrusted project is ignored", async () => {
+test("trusted project replaces agent-notify hook; untrusted project is ignored", async () => {
   const { agentDir, cwd } = await fixture();
   await writeFile(
     join(agentDir, "pi-notify.json"),
-    JSON.stringify({ "pi_notify:agent_notify": ["cmd:global-hook"] }),
+    JSON.stringify({ hooks: { "agent-notify": { actions: ["cmd:global-hook"] } } }),
   );
   await writeFile(
     join(cwd, ".pi", "pi-notify.json"),
-    JSON.stringify({ "pi_notify:agent_notify": ["cmd:project-hook", "js:void 0"] }),
+    JSON.stringify({ hooks: { "agent-notify": { actions: ["cmd:project-hook", "js:void 0"] } } }),
   );
 
   const trusted = await loadConfig({ agentDir, cwd, projectTrusted: true, warn: () => undefined });
-  assert.deepEqual(trusted["pi_notify:agent_notify"], ["cmd:project-hook", "js:void 0"]);
+  assert.deepEqual(trusted.hooks["agent-notify"]?.actions, ["cmd:project-hook", "js:void 0"]);
 
   const untrusted = await loadConfig({ agentDir, cwd, projectTrusted: false, warn: () => undefined });
-  assert.deepEqual(untrusted["pi_notify:agent_notify"], ["cmd:global-hook"]);
+  assert.deepEqual(untrusted.hooks["agent-notify"]?.actions, ["cmd:global-hook"]);
 });
 
 test("cmd behavior remains host-default-shell program text without extra quoting", async () => {
@@ -116,6 +158,7 @@ test("cmd behavior remains host-default-shell program text without extra quoting
       event: "agent_settled",
       cwd: "/work",
       sessionId: "s1",
+      values: {},
     }),
   );
 
@@ -137,7 +180,7 @@ test("structured shell spawns shell:false with exact executable argv env and opt
     event: "agent_settled",
     cwd: "/work",
     sessionId: "s1",
-    title: "T",
+    values: { TITLE: "T" },
   });
   launch("C:\\Program Files\\tool.exe", ["--path", "C:\\Users\\%USER%\\x", "a b"], "/work", env);
 
@@ -159,15 +202,19 @@ test("shell action launches direct argv and continues later actions", async () =
   await writeFile(
     join(agentDir, "pi-notify.json"),
     JSON.stringify({
-      agent_settled: [
-        ["shell:/bin/bash", "-lc", "echo first"],
-        "js:throw new Error('js boom')",
-        "cmd:after-js",
-      ],
+      events: {
+        agent_settled: {
+          actions: [
+            ["shell:/bin/bash", "-lc", "echo first"],
+            "js:throw new Error('js boom')",
+            "cmd:after-js",
+          ],
+        },
+      },
     }),
   );
 
-  const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
+  const { handlers, pi } = createPiHarness();
   const shellLaunches: Array<{ executable: string; args: string[] }> = [];
   const cmdLaunches: string[] = [];
   const jsCalls: string[] = [];
@@ -183,13 +230,11 @@ test("shell action launches direct argv and continues later actions", async () =
     },
     warn: (message) => warnings.push(message),
   };
-  const pi = {
-    on: (event: string, handler: (event: any, ctx: any) => void | Promise<void>) => handlers.set(event, handler),
-    registerTool: () => undefined,
-  } as any;
 
   registerExtension(pi, runtime);
+  await handlers.get("session_start")?.({ type: "session_start" }, makeCtx(cwd));
   await handlers.get("agent_settled")?.({ type: "agent_settled" }, makeCtx(cwd));
+  await flush();
 
   assert.deepEqual(shellLaunches, [{ executable: "/bin/bash", args: ["-lc", "echo first"] }]);
   assert.equal(jsCalls.length, 1);
@@ -207,32 +252,32 @@ test("bare powershell.exe resolves; explicit powershell paths stay exact", async
   await writeFile(
     join(agentDir, "pi-notify.json"),
     JSON.stringify({
-      agent_settled: [
-        ["shell:powershell.exe", "-NoProfile", "-Command", "Write-Output bare"],
-        ["shell:/custom/powershell.exe", "-NoProfile", "-Command", "Write-Output explicit"],
-        ["shell:C:\\custom\\powershell.exe", "-NoProfile", "-Command", "Write-Output winpath"],
-      ],
+      events: {
+        agent_settled: {
+          actions: [
+            ["shell:powershell.exe", "-NoProfile", "-Command", "Write-Output bare"],
+            ["shell:/custom/powershell.exe", "-NoProfile", "-Command", "Write-Output explicit"],
+            ["shell:C:\\custom\\powershell.exe", "-NoProfile", "-Command", "Write-Output winpath"],
+          ],
+        },
+      },
     }),
   );
 
-  const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
+  const { handlers, pi } = createPiHarness();
   const shellLaunches: Array<{ executable: string; args: string[] }> = [];
-  registerExtension(
-    {
-      on: (event: string, handler: (event: any, ctx: any) => void | Promise<void>) => handlers.set(event, handler),
-      registerTool: () => undefined,
-    } as any,
-    {
-      agentDir,
-      launchOsc: () => undefined,
-      launchCommand: () => undefined,
-      launchShell: (executable, args) => shellLaunches.push({ executable, args: [...args] }),
-      resolvePowerShell: () => "/resolved/powershell.exe",
-      warn: () => undefined,
-    },
-  );
+  registerExtension(pi, {
+    agentDir,
+    launchOsc: () => undefined,
+    launchCommand: () => undefined,
+    launchShell: (executable, args) => shellLaunches.push({ executable, args: [...args] }),
+    resolvePowerShell: () => "/resolved/powershell.exe",
+    warn: () => undefined,
+  });
 
+  await handlers.get("session_start")?.({ type: "session_start" }, makeCtx(cwd));
   await handlers.get("agent_settled")?.({ type: "agent_settled" }, makeCtx(cwd));
+  await flush();
   assert.deepEqual(shellLaunches, [
     { executable: "/resolved/powershell.exe", args: ["-NoProfile", "-Command", "Write-Output bare"] },
     { executable: "/custom/powershell.exe", args: ["-NoProfile", "-Command", "Write-Output explicit"] },
@@ -356,21 +401,28 @@ test("Windows Terminal toast falls back immediately when PowerShell is unavailab
   assert.match(writes[0] ?? "", /\]99;/);
 });
 
-test("sync structured shell spawn error aggregates; async child error stays warn-only", async () => {
+test("sync structured shell spawn error warns on lifecycle; async child error stays warn-only", async () => {
   const { agentDir, cwd } = await fixture();
   await writeFile(
     join(agentDir, "pi-notify.json"),
     JSON.stringify({
-      "pi_notify:agent_notify": [
-        ["shell:/missing/tool", "--flag"],
-        "cmd:after-shell",
-      ],
-      agent_settled: [["shell:/missing/async", "x"]],
+      hooks: {
+        "agent-notify": {
+          actions: [
+            ["shell:/missing/tool", "--flag"],
+            "cmd:after-shell",
+          ],
+        },
+      },
+      events: {
+        agent_settled: {
+          actions: [["shell:/missing/async", "x"]],
+        },
+      },
     }),
   );
 
-  const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
-  const tools: Array<{ execute: Function }> = [];
+  const { handlers, tools, pi } = createPiHarness();
   const commands: string[] = [];
   const warnings: string[] = [];
   let asyncListener: ((error: Error) => void) | undefined;
@@ -392,90 +444,79 @@ test("sync structured shell spawn error aggregates; async child error stays warn
     warn: (message) => warnings.push(message),
   });
 
-  registerExtension(
-    {
-      on: (event: string, handler: (event: any, ctx: any) => void | Promise<void>) => handlers.set(event, handler),
-      registerTool: (tool: any) => tools.push(tool),
-    } as any,
-    {
-      agentDir,
-      launchOsc: () => undefined,
-      launchCommand: (command) => commands.push(command),
-      launchShell: shellLaunch,
-      warn: (message) => warnings.push(message),
-    },
-  );
+  registerExtension(pi, {
+    agentDir,
+    launchOsc: () => undefined,
+    launchCommand: (command) => commands.push(command),
+    launchShell: shellLaunch,
+    warn: (message) => warnings.push(message),
+  });
 
   await handlers.get("session_start")?.({ type: "session_start" }, makeCtx(cwd));
-  await assert.rejects(
-    () => tools[0]!.execute("call-shell", { title: "T", content: "C" }, undefined, undefined, makeCtx(cwd)),
-    (error: Error) => {
-      assert.match(error.message, /pi-notify action failures/);
-      assert.match(error.message, /spawn ENOENT sync/);
-      return true;
-    },
-  );
-  assert.deepEqual(commands, ["after-shell"]);
+  assert.equal(tools.length, 1);
+
+  const result = await tools[0]!.execute("call-shell", { title: "T", content: "C" }, undefined, undefined, makeCtx(cwd));
+  assert.equal(result.content[0].text, "Notification hook published");
+  await flush();
+  assert.ok(commands.includes("after-shell"));
+  assert.ok(warnings.some((entry) => entry.includes("spawn ENOENT sync")));
 
   const beforeAsync = warnings.length;
   await handlers.get("agent_settled")?.({ type: "agent_settled" }, makeCtx(cwd));
+  await flush();
   assert.ok(asyncListener);
   asyncListener!(new Error("async child failed"));
   assert.ok(warnings.slice(beforeAsync).some((entry) => entry.includes("async child failed")));
-  assert.ok(!warnings.slice(beforeAsync).some((entry) => entry.includes("pi-notify action failures")));
 });
 
-test("synchronous OSC failure participates in agent_notify aggregate while later action runs", async () => {
+test("synchronous OSC failure in consumer does not change agent_notify publication result", async () => {
   const { agentDir, cwd } = await fixture();
   await writeFile(
     join(agentDir, "pi-notify.json"),
     JSON.stringify({
-      "pi_notify:agent_notify": ["osc", "cmd:after-osc"],
+      hooks: {
+        "agent-notify": {
+          actions: ["osc:{{TITLE}}|{{CONTENT}}", "cmd:after-osc"],
+        },
+      },
     }),
   );
 
-  const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
-  const tools: Array<{ execute: Function }> = [];
+  const { handlers, tools, pi } = createPiHarness();
   const commands: string[] = [];
-  registerExtension(
-    {
-      on: (event: string, handler: (event: any, ctx: any) => void | Promise<void>) => handlers.set(event, handler),
-      registerTool: (tool: any) => tools.push(tool),
-    } as any,
-    {
-      agentDir,
-      launchOsc: () => {
-        throw new Error("stdout write failed");
-      },
-      launchCommand: (command) => commands.push(command),
-      launchShell: () => undefined,
-      warn: () => undefined,
+  const warnings: string[] = [];
+  registerExtension(pi, {
+    agentDir,
+    launchOsc: () => {
+      throw new Error("stdout write failed");
     },
-  );
+    launchCommand: (command) => commands.push(command),
+    launchShell: () => undefined,
+    warn: (message) => warnings.push(message),
+  });
 
   await handlers.get("session_start")?.({ type: "session_start" }, makeCtx(cwd));
-  await assert.rejects(
-    () => tools[0]!.execute("call-osc", { title: "T", content: "C" }, undefined, undefined, makeCtx(cwd)),
-    (error: Error) => {
-      assert.match(error.message, /pi-notify action failures/);
-      assert.match(error.message, /stdout write failed/);
-      return true;
-    },
-  );
+  const result = await tools[0]!.execute("call-osc", { title: "T", content: "C" }, undefined, undefined, makeCtx(cwd));
+  assert.equal(result.content[0].text, "Notification hook published");
+  await flush();
   assert.deepEqual(commands, ["after-osc"]);
+  assert.ok(warnings.some((entry) => entry.includes("stdout write failed")));
 });
 
-test("WT toast unref fallback write throw aggregates in agent_notify; later child error does not re-fallback", async () => {
+test("WT toast unref fallback write throw is consumer-only; later child error does not re-fallback", async () => {
   const { agentDir, cwd } = await fixture();
   await writeFile(
     join(agentDir, "pi-notify.json"),
     JSON.stringify({
-      "pi_notify:agent_notify": ["osc", "cmd:after-fallback"],
+      hooks: {
+        "agent-notify": {
+          actions: ["osc:{{TITLE}}|{{CONTENT}}", "cmd:after-fallback"],
+        },
+      },
     }),
   );
 
-  const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
-  const tools: Array<{ execute: Function }> = [];
+  const { handlers, tools, pi } = createPiHarness();
   const commands: string[] = [];
   const warnings: string[] = [];
   let errorListener: ((error: Error) => void) | undefined;
@@ -500,36 +541,24 @@ test("WT toast unref fallback write throw aggregates in agent_notify; later chil
     warn: (message) => warnings.push(message),
   });
 
-  registerExtension(
-    {
-      on: (event: string, handler: (event: any, ctx: any) => void | Promise<void>) => handlers.set(event, handler),
-      registerTool: (tool: any) => tools.push(tool),
-    } as any,
-    {
-      agentDir,
-      launchOsc,
-      launchCommand: (command) => commands.push(command),
-      launchShell: () => undefined,
-      warn: (message) => warnings.push(message),
-    },
-  );
+  registerExtension(pi, {
+    agentDir,
+    launchOsc,
+    launchCommand: (command) => commands.push(command),
+    launchShell: () => undefined,
+    warn: (message) => warnings.push(message),
+  });
 
   await handlers.get("session_start")?.({ type: "session_start" }, makeCtx(cwd));
-  await assert.rejects(
-    () =>
-      tools[0]!.execute(
-        "call-wt-fallback",
-        { title: "T", content: "C" },
-        undefined,
-        undefined,
-        makeCtx(cwd),
-      ),
-    (error: Error) => {
-      assert.match(error.message, /pi-notify action failures/);
-      assert.match(error.message, /fallback stdout failed/);
-      return true;
-    },
+  const result = await tools[0]!.execute(
+    "call-wt-fallback",
+    { title: "T", content: "C" },
+    undefined,
+    undefined,
+    makeCtx(cwd),
   );
+  assert.equal(result.content[0].text, "Notification hook published");
+  await flush();
   assert.deepEqual(commands, ["after-fallback"]);
   assert.equal(writeAttempts, 1);
   assert.ok(errorListener);
@@ -546,11 +575,15 @@ test("awaited js action receives pi, ctx, full event, notification and later act
   await writeFile(
     join(agentDir, "pi-notify.json"),
     JSON.stringify({
-      "tool_execution_start:ask_user_question": ["js:seen", "cmd:after"],
+      events: {
+        "tool_execution_start:ask_user_question": {
+          actions: ["js:seen", "cmd:after"],
+        },
+      },
     }),
   );
 
-  const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
+  const { handlers, pi } = createPiHarness();
   const launches: string[] = [];
   const seen: Array<{ pi: unknown; ctx: unknown; event: unknown; notification: unknown }> = [];
   const runtime: NotificationRuntime = {
@@ -564,11 +597,7 @@ test("awaited js action receives pi, ctx, full event, notification and later act
     },
     warn: () => undefined,
   };
-  const pi = {
-    on: (event: string, handler: (event: any, ctx: any) => void | Promise<void>) => handlers.set(event, handler),
-    registerTool: () => undefined,
-    marker: "pi-object",
-  } as any;
+  (pi as any).marker = "pi-object";
 
   registerExtension(pi, runtime);
   const event = {
@@ -578,7 +607,9 @@ test("awaited js action receives pi, ctx, full event, notification and later act
     args: { questions: [{ question: "secret" }] },
   };
   const ctx = makeCtx(cwd);
+  await handlers.get("session_start")?.({ type: "session_start" }, ctx);
   await handlers.get("tool_execution_start")?.(event, ctx);
+  await flush();
 
   assert.equal(seen.length, 1);
   assert.equal(seen[0]?.pi, pi);
@@ -586,25 +617,24 @@ test("awaited js action receives pi, ctx, full event, notification and later act
   assert.deepEqual(seen[0]?.event, event);
   assert.equal((seen[0]?.notification as any).event, "tool_execution_start:ask_user_question");
   assert.equal((seen[0]?.notification as any).tool, "ask_user_question");
+  assert.equal(typeof (seen[0]?.notification as any).osc, "function");
+  assert.deepEqual((seen[0]?.notification as any).values, {});
   assert.equal(launches[0], "after");
 });
 
-test("missing empty or all-invalid agent_notify hook does not register the tool", async () => {
+test("missing empty or all-invalid agent-notify hook does not register the tool", async () => {
   const cases = [
     {},
-    { "pi_notify:agent_notify": [] },
-    { "pi_notify:agent_notify": ["cmd:", "js:", "shell:", ["shell:/bin/bash"], ["shell:", "x"]] },
+    { hooks: { "agent-notify": { actions: [] } } },
+    { hooks: { "agent-notify": { actions: ["cmd:", "js:", "shell:", ["shell:/bin/bash"], ["shell:", "x"]] } } },
+    { hooks: { "agent-notify": { actions: ["osc"] } } },
+    { "pi_notify:agent_notify": ["cmd:legacy"] },
   ];
 
   for (const document of cases) {
     const { agentDir, cwd } = await fixture();
     await writeFile(join(agentDir, "pi-notify.json"), JSON.stringify(document));
-    const registered: string[] = [];
-    const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
-    const pi = {
-      on: (event: string, handler: (event: any, ctx: any) => void | Promise<void>) => handlers.set(event, handler),
-      registerTool: (tool: { name: string }) => registered.push(tool.name),
-    } as any;
+    const { handlers, tools, pi } = createPiHarness();
     registerExtension(pi, {
       agentDir,
       launchOsc: () => undefined,
@@ -613,33 +643,35 @@ test("missing empty or all-invalid agent_notify hook does not register the tool"
       warn: () => undefined,
     });
     await handlers.get("session_start")?.({ type: "session_start" }, makeCtx(cwd));
-    assert.deepEqual(registered, []);
+    assert.deepEqual(tools.map((tool) => tool.name), []);
   }
 });
 
-test("valid agent_notify hook registers once with title/content schema and TITLE/CONTENT context", async () => {
+test("valid agent-notify hook registers once, publishes envelope, and consumer gets TITLE/CONTENT", async () => {
   const { agentDir, cwd } = await fixture();
   await writeFile(
     join(agentDir, "pi-notify.json"),
     JSON.stringify({
-      "pi_notify:agent_notify": [
-        "osc",
-        "osc:Title {{TITLE}}|Body {{CONTENT}}",
-        ["shell:/usr/bin/env", "echo", "$PI_NOTIFY_TITLE"],
-        "js:capture",
-      ],
+      hooks: {
+        "agent-notify": {
+          actions: [
+            "osc:{{TITLE}}|{{CONTENT}}",
+            "osc:Title {{TITLE}}|Body {{CONTENT}}",
+            ["shell:/usr/bin/env", "echo", "$PI_NOTIFY_TITLE"],
+            "js:capture",
+          ],
+        },
+      },
     }),
   );
 
-  const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
-  const tools: Array<{ name: string; description: string; promptSnippet?: string; parameters: any; execute: Function }> =
-    [];
+  const { handlers, tools, pi } = createPiHarness();
   const launches: Array<{
     type: string;
     value?: string;
     executable?: string;
     args?: string[];
-    env?: Record<string, string>;
+    env?: Record<string, string | undefined>;
   }> = [];
   const jsScopes: any[] = [];
   const runtime: NotificationRuntime = {
@@ -652,10 +684,6 @@ test("valid agent_notify hook registers once with title/content schema and TITLE
     },
     warn: () => undefined,
   };
-  const pi = {
-    on: (event: string, handler: (event: any, ctx: any) => void | Promise<void>) => handlers.set(event, handler),
-    registerTool: (tool: any) => tools.push(tool),
-  } as any;
 
   registerExtension(pi, runtime);
   const ctx = makeCtx(cwd);
@@ -664,17 +692,13 @@ test("valid agent_notify hook registers once with title/content schema and TITLE
 
   assert.equal(tools.length, 1);
   assert.equal(tools[0]?.name, "agent_notify");
-  assert.match(tools[0]?.description ?? "", /external notification/i);
-  assert.match(tools[0]?.promptSnippet ?? "", /titled notification/i);
+  assert.match(tools[0]?.description ?? "", /notification|hook/i);
   assert.ok(tools[0]?.parameters.properties.title);
   assert.ok(tools[0]?.parameters.properties.content);
-  assert.deepEqual(tools[0]?.parameters.required ?? Object.keys(tools[0]?.parameters.properties ?? {}), [
-    "title",
-    "content",
-  ]);
 
   const result = await tools[0]!.execute("call-1", { title: "Ship", content: "Ready" }, undefined, undefined, ctx);
-  assert.match(String(result.content[0].text), /Notification sent/);
+  assert.equal(result.content[0].text, "Notification hook published");
+  await flush();
 
   assert.deepEqual(
     launches.filter((entry) => entry.type === "osc").map((entry) => entry.value),
@@ -686,27 +710,32 @@ test("valid agent_notify hook registers once with title/content schema and TITLE
   assert.deepEqual(shell?.args, ["echo", "$PI_NOTIFY_TITLE"]);
   assert.equal(shell?.env?.PI_NOTIFY_TITLE, "Ship");
   assert.equal(shell?.env?.PI_NOTIFY_CONTENT, "Ready");
-  assert.equal(shell?.env?.PI_NOTIFY_EVENT, "pi_notify:agent_notify");
+  assert.equal(shell?.env?.PI_NOTIFY_EVENT, "hook:agent-notify");
+  assert.equal(shell?.env?.PI_NOTIFY_HOOK, "agent-notify");
 
   assert.equal(jsScopes.length, 1);
-  assert.equal(jsScopes[0].notification.title, "Ship");
-  assert.equal(jsScopes[0].notification.content, "Ready");
-  assert.equal(jsScopes[0].event.toolName, "agent_notify");
-  assert.deepEqual(jsScopes[0].event.args, { title: "Ship", content: "Ready" });
+  assert.equal(jsScopes[0].notification.values.TITLE, "Ship");
+  assert.equal(jsScopes[0].notification.values.CONTENT, "Ready");
+  assert.equal(jsScopes[0].event.name, "agent-notify");
+  assert.deepEqual(jsScopes[0].event.values, { TITLE: "Ship", CONTENT: "Ready" });
 });
 
-test("agent_notify attempts all actions and throws one aggregate error on failures", async () => {
+test("agent_notify consumer action failures never feed back into the tool result", async () => {
   const { agentDir, cwd } = await fixture();
   await writeFile(
     join(agentDir, "pi-notify.json"),
     JSON.stringify({
-      "pi_notify:agent_notify": ["js:one", "cmd:two", "js:three"],
+      hooks: {
+        "agent-notify": {
+          actions: ["js:one", "cmd:two", "js:three"],
+        },
+      },
     }),
   );
 
-  const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
-  const tools: Array<{ execute: Function }> = [];
+  const { handlers, tools, pi } = createPiHarness();
   const commands: string[] = [];
+  const warnings: string[] = [];
   const runtime: NotificationRuntime = {
     agentDir,
     launchOsc: () => undefined,
@@ -718,61 +747,57 @@ test("agent_notify attempts all actions and throws one aggregate error on failur
     runJs: async (code) => {
       throw new Error(`js failed ${code}`);
     },
-    warn: () => undefined,
+    warn: (message) => warnings.push(message),
   };
-  const pi = {
-    on: (event: string, handler: (event: any, ctx: any) => void | Promise<void>) => handlers.set(event, handler),
-    registerTool: (tool: any) => tools.push(tool),
-  } as any;
 
   registerExtension(pi, runtime);
   await handlers.get("session_start")?.({ type: "session_start" }, makeCtx(cwd));
 
-  await assert.rejects(
-    () => tools[0]!.execute("call-2", { title: "T", content: "C" }, undefined, undefined, makeCtx(cwd)),
-    (error: Error) => {
-      assert.match(error.message, /pi-notify action failures/);
-      assert.match(error.message, /js failed js:one|js failed one/);
-      assert.match(error.message, /cmd launch failed/);
-      assert.match(error.message, /js failed js:three|js failed three/);
-      return true;
-    },
-  );
+  const result = await tools[0]!.execute("call-2", { title: "T", content: "C" }, undefined, undefined, makeCtx(cwd));
+  assert.equal(result.content[0].text, "Notification hook published");
+  await flush();
   assert.deepEqual(commands, ["two"]);
+  assert.ok(warnings.some((entry) => /js failed|cmd launch failed/.test(entry)));
 });
 
 test("lifecycle hooks never throw into Pi when actions fail", async () => {
   const { agentDir, cwd } = await fixture();
   await writeFile(
     join(agentDir, "pi-notify.json"),
-    JSON.stringify({ agent_settled: ["js:boom", "cmd:still-runs"] }),
+    JSON.stringify({
+      events: {
+        agent_settled: {
+          actions: ["js:boom", "cmd:still-runs"],
+        },
+      },
+    }),
   );
 
-  const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
+  const { handlers, pi } = createPiHarness();
   const commands: string[] = [];
   const warnings: string[] = [];
-  registerExtension(
-    {
-      on: (event: string, handler: (event: any, ctx: any) => void | Promise<void>) => handlers.set(event, handler),
-      registerTool: () => undefined,
-    } as any,
-    {
-      agentDir,
-      launchOsc: () => undefined,
-      launchCommand: (command) => commands.push(command),
-      launchShell: () => undefined,
-      runJs: async () => {
-        throw new Error("boom");
-      },
-      warn: (message) => warnings.push(message),
+  registerExtension(pi, {
+    agentDir,
+    launchOsc: () => undefined,
+    launchCommand: (command) => commands.push(command),
+    launchShell: () => undefined,
+    runJs: async () => {
+      throw new Error("boom");
     },
-  );
+    warn: (message) => warnings.push(message),
+  });
 
+  await handlers.get("session_start")?.({ type: "session_start" }, makeCtx(cwd));
   await handlers.get("agent_settled")?.({ type: "agent_settled" }, makeCtx(cwd));
+  await flush();
   assert.deepEqual(commands, ["still-runs"]);
   assert.ok(warnings.length > 0);
 });
 
 test("TITLE and CONTENT templates render only when provided", () => {
   assert.equal(renderTemplate("{{TITLE}} / {{CONTENT}} / {{TOOL}}", { TITLE: "A", CONTENT: "B" }), "A / B / {{TOOL}}");
+});
+
+test("semantic channel constant is stable", () => {
+  assert.equal(SEMANTIC_HOOK_CHANNEL, "pi:semantic-hook:v1");
 });

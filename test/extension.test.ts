@@ -15,13 +15,19 @@ test("routes settled and ask-user events while ignoring other tools", async () =
   await writeFile(
     join(agentDir, "pi-notify.json"),
     JSON.stringify({
-      agent_settled: ["osc:Pi|{{EVENT}} at {{CWD}}", "cmd:idle-command"],
-      "tool_execution_start:ask_user_question": ["osc:Pi|{{TOOL}} needs input", "cmd:question-command"],
+      events: {
+        agent_settled: {
+          actions: ["osc:Pi|{{EVENT}} at {{CWD}}", "cmd:idle-command"],
+        },
+        "tool_execution_start:ask_user_question": {
+          actions: ["osc:Pi|{{TOOL}} needs input", "cmd:question-command"],
+        },
+      },
     }),
   );
 
   const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
-  const launches: Array<{ type: string; value: string; env?: Record<string, string> }> = [];
+  const launches: Array<{ type: string; value: string; env?: Record<string, string | undefined> }> = [];
   const runtime: NotificationRuntime = {
     agentDir,
     launchOsc: (title, body) => launches.push({ type: "osc", value: `${title}|${body}` }),
@@ -31,6 +37,10 @@ test("routes settled and ask-user events while ignoring other tools", async () =
   };
   const pi = {
     on: (event: string, handler: (event: any, ctx: any) => void | Promise<void>) => handlers.set(event, handler),
+    events: {
+      on: () => () => undefined,
+      emit: () => undefined,
+    },
   } as any;
   registerExtension(pi, runtime);
   const ctx = {
@@ -42,6 +52,7 @@ test("routes settled and ask-user events while ignoring other tools", async () =
     },
   };
 
+  await handlers.get("session_start")?.({ type: "session_start" }, ctx);
   await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
   await handlers.get("tool_execution_start")?.(
     { type: "tool_execution_start", toolName: "bash", toolCallId: "call-0", args: { secret: "never expose" } },
@@ -57,6 +68,10 @@ test("routes settled and ask-user events while ignoring other tools", async () =
     ctx,
   );
 
+  // delayMs 0 uses queueMicrotask
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
   assert.deepEqual(
     launches.map(({ type, value }) => ({ type, value })),
     [
@@ -67,5 +82,5 @@ test("routes settled and ask-user events while ignoring other tools", async () =
     ],
   );
   assert.equal(launches[3]?.env?.PI_NOTIFY_TOOL, "ask_user_question");
-  assert.equal(Object.values(launches[3]?.env ?? {}).some((value) => value.includes("private")), false);
+  assert.equal(Object.values(launches[3]?.env ?? {}).some((value) => (value ?? "").includes("private")), false);
 });

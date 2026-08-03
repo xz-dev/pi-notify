@@ -6,6 +6,7 @@ import test from "node:test";
 
 import registerExtension, { type NotificationRuntime } from "../index.js";
 import { loadConfig } from "../src/config.js";
+import { SEMANTIC_HOOK_CHANNEL } from "../src/semantic-hook.js";
 
 async function fixture(): Promise<{ agentDir: string; cwd: string }> {
   const root = await import("node:fs/promises").then(({ mkdtemp }) => mkdtemp(join(tmpdir(), "pi-notify-red-")));
@@ -17,19 +18,23 @@ async function fixture(): Promise<{ agentDir: string; cwd: string }> {
 }
 
 /**
- * Representative acceptance: valid pi_notify:agent_notify hook registers agent_notify once,
- * title/content reach structured shell env + OSC template. Shell is a flat argv tuple.
+ * Representative acceptance: valid hooks.agent-notify registers agent_notify once,
+ * publishes a neutral envelope, and the generic consumer routes TITLE/CONTENT to actions.
  */
 test("agent_notify registers once with title/content and structured shell argv", async () => {
   const { agentDir, cwd } = await fixture();
   await writeFile(
     join(agentDir, "pi-notify.json"),
     JSON.stringify({
-      "pi_notify:agent_notify": [
-        "osc:{{TITLE}}|{{CONTENT}}",
-        ["shell:/bin/bash", "-lc", "notify \"$PI_NOTIFY_TITLE\""],
-        "cmd:legacy-cmd",
-      ],
+      hooks: {
+        "agent-notify": {
+          actions: [
+            "osc:{{TITLE}}|{{CONTENT}}",
+            ["shell:/bin/bash", "-lc", "notify \"$PI_NOTIFY_TITLE\""],
+            "cmd:legacy-cmd",
+          ],
+        },
+      },
     }),
   );
 
@@ -40,7 +45,7 @@ test("agent_notify registers once with title/content and structured shell argv",
     projectTrusted: true,
     warn: (message) => warnings.push(message),
   });
-  assert.deepEqual(config["pi_notify:agent_notify"], [
+  assert.deepEqual(config.hooks["agent-notify"]?.actions, [
     "osc:{{TITLE}}|{{CONTENT}}",
     ["shell:/bin/bash", "-lc", "notify \"$PI_NOTIFY_TITLE\""],
     "cmd:legacy-cmd",
@@ -48,13 +53,14 @@ test("agent_notify registers once with title/content and structured shell argv",
   assert.deepEqual(warnings, []);
 
   const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
+  const bus = new Map<string, Set<(data: unknown) => void>>();
   const registeredTools: Array<{ name: string; parameters: any; execute: Function }> = [];
   const launches: Array<{
     type: string;
     value?: string;
     executable?: string;
     args?: string[];
-    env?: Record<string, string>;
+    env?: Record<string, string | undefined>;
   }> = [];
   const runtime: NotificationRuntime = {
     agentDir,
@@ -67,6 +73,20 @@ test("agent_notify registers once with title/content and structured shell argv",
   const pi = {
     on: (event: string, handler: (event: any, ctx: any) => void | Promise<void>) => handlers.set(event, handler),
     registerTool: (tool: { name: string; parameters: any; execute: Function }) => registeredTools.push(tool),
+    events: {
+      on: (channel: string, handler: (data: unknown) => void) => {
+        let set = bus.get(channel);
+        if (!set) {
+          set = new Set();
+          bus.set(channel, set);
+        }
+        set.add(handler);
+        return () => set!.delete(handler);
+      },
+      emit: (channel: string, data: unknown) => {
+        for (const handler of bus.get(channel) ?? []) handler(data);
+      },
+    },
   } as any;
 
   registerExtension(pi, runtime);
@@ -97,7 +117,8 @@ test("agent_notify registers once with title/content and structured shell argv",
     ctx,
   );
 
-  assert.match(String(result?.content?.[0]?.text ?? result), /notified|sent|success/i);
+  assert.equal(result?.content?.[0]?.text, "Notification hook published");
+  await new Promise((resolve) => setTimeout(resolve, 30));
 
   const osc = launches.find((entry) => entry.type === "osc");
   assert.equal(osc?.value, "Build done|Tests passed");
@@ -108,9 +129,11 @@ test("agent_notify registers once with title/content and structured shell argv",
   assert.deepEqual(shell!.args, ["-lc", "notify \"$PI_NOTIFY_TITLE\""]);
   assert.equal(shell!.env?.PI_NOTIFY_TITLE, "Build done");
   assert.equal(shell!.env?.PI_NOTIFY_CONTENT, "Tests passed");
-  assert.equal(shell!.env?.PI_NOTIFY_EVENT, "pi_notify:agent_notify");
+  assert.equal(shell!.env?.PI_NOTIFY_EVENT, "hook:agent-notify");
+  assert.equal(shell!.env?.PI_NOTIFY_HOOK, "agent-notify");
 
   const legacy = launches.find((entry) => entry.value === "legacy-cmd");
   assert.ok(legacy);
   assert.equal(legacy!.env?.PI_NOTIFY_TITLE, "Build done");
+  assert.equal(SEMANTIC_HOOK_CHANNEL, "pi:semantic-hook:v1");
 });

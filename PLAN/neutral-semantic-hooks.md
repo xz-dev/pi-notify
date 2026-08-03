@@ -1,6 +1,6 @@
 # Neutral semantic hooks
 
-Status: Accepted plan; theory and bounded feasibility proven; production code not started
+Status: Implemented on feat/neutral-semantic-hooks (uncommitted worktree). Breaking nested events/hooks config, generic semantic-hook consumer, delay lifecycle, agent_notify producer migration, notification.values/osc helper, packed E2E, docs/skill updates.
 
 ## Goal
 
@@ -208,7 +208,7 @@ On `session_shutdown`/reload, pi-notify unsubscribes idempotently, cancels all p
 - Tool execution publishes a neutral envelope named `agent-notify` with `TITLE` and `CONTENT` values.
 - The tool producer knows its own semantic name but does not access action definitions or consumer internals.
 - The generic router receives the envelope exactly like any other hook.
-- Because bus delivery is non-acknowledged, the tool result can truthfully report only that the hook was published, not that every consumer action completed. The implementation plan must update the current synchronous aggregate-error promise accordingly and obtain acceptance if model-visible wording changes.
+- Because bus delivery is non-acknowledged, the tool result truthfully reports only that the hook was published: exact model-visible success text is `Notification hook published`. Synchronous emit/construction failures are tool errors. Consumer/action failures warn independently and never feed back.
 
 ## Implementation slices
 
@@ -232,6 +232,10 @@ Do not start production work until the model-visible `agent_notify` result wordi
    - Verify generic hook routing, producer values, configured delay in milliseconds, delay-before-live-context/environment collection, action execution, missing listener behavior, reload cleanup, and no duplicate listener after reload.
 7. **Documentation and migration**
    - Update README examples, security model, protocol semantics, breaking migration, and limitations.
+
+### Bare hook osc decision
+
+Bare `osc` remains valid for lifecycle bindings (built-in default copy). Hook bindings reject bare `osc` with a bounded config diagnostic; use `osc:<title>|<body>` or `notification.osc` in `js:`. This matches the packaged skill pitfall and avoids inventing semantic-specific defaults.
 
 ## Required verification
 

@@ -32,9 +32,10 @@ test("adapt-pi-notify skill is packaged with the accepted neutral-hook contract"
   assert.match(skill, /no debounce, de-duplication, coalescing, or latest-event replacement/);
   assert.match(skill, /reload\/shutdown cancels pending timers and advances generation/);
 
-  assert.match(skill, /\*\*Planned API:\*\*/);
-  assert.match(skill, /not available in the current pre-neutral-hooks pi-notify runtime/);
+  assert.match(skill, /notification\.values/);
   assert.match(skill, /notification\.osc\("Pi", notification\.values\.REASON\)/);
+  assert.doesNotMatch(skill, /Planned API/);
+  assert.doesNotMatch(skill, /not available in the current pre-neutral-hooks pi-notify runtime/);
 
   assert.match(skill, /representative acceptance test and run it against the baseline to prove RED/);
   assert.match(skill, /fresh isolated Pi process/);

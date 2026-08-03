@@ -192,9 +192,7 @@ Use `delayMs: 0` when the producer already emits at the authoritative final boun
 
 ## JavaScript Notification Helpers
 
-> **Planned API:** `notification.values` and `notification.osc(title, body)` belong to the accepted neutral-hooks consumer plan. They are not available in the current pre-neutral-hooks pi-notify runtime. Do not deploy the example below until the implementation and packed tests that provide these APIs have landed.
-
-When the planned consumer API is available and conditional notification text is needed, use its generic JavaScript notification context rather than hardcoding semantics in pi-notify:
+When conditional notification text is needed, use the generic JavaScript notification context rather than hardcoding semantics in pi-notify:
 
 ```js
 const kind = notification.values.STOP_KIND;
@@ -256,7 +254,7 @@ Add a representative acceptance test and run it against the baseline to prove RE
 - `pi.events.emit()` does not await asynchronous consumers.
 - Removing a listener cannot cancel consumer work already in flight.
 - A fake clock must advance `now()` when runtime timers use deadlines/chunking.
-- A bare hook `osc` has no semantic-specific default text; configure explicit text, or—only after the planned helper has landed—use `notification.osc`.
+- A bare hook `osc` has no semantic-specific default text; configure explicit text, or use `notification.osc`.
 - Do not add a delay after an already-authoritative producer boundary merely to guess whether work resumes.
 
 ## Completion Checklist

@@ -1,6 +1,6 @@
 # pi-notify
 
-Configurable notifications for [Pi](https://github.com/badlogic/pi-mono). Notify through terminal-native protocols, launch commands through the platform shell or an explicit interpreter, run trusted JavaScript against Pi's public extension APIs, and optionally let the AI send a titled notification.
+Configurable notifications for [Pi](https://github.com/badlogic/pi-mono). Notify through terminal-native protocols, launch commands through the platform shell or an explicit interpreter, run trusted JavaScript against Pi's public extension APIs, consume neutral semantic hooks from other extensions, and optionally let the AI publish a titled notification hook.
 
 Inspired by [ferologics/pi-notify](https://github.com/ferologics/pi-notify).
 
@@ -8,16 +8,18 @@ Inspired by [ferologics/pi-notify](https://github.com/ferologics/pi-notify).
 
 - Uses Pi's public `agent_settled` event, so an idle notification is sent only after automatic retries, compaction, and queued continuations have settled.
 - Observes `ask_user_question` through `tool_execution_start` without blocking or modifying the tool call.
-- Loads global configuration plus optional trusted-project overrides.
+- Consumes neutral semantic hooks on the public `pi:semantic-hook:v1` bus without a hook-name whitelist or producer identity.
+- Loads nested global configuration plus optional trusted-project whole-unit overrides.
+- Supports per-binding `delayMs` with retain-causal → delay → collect-live → execute semantics (no debounce/dedup).
 - Supports terminal notifications through Windows Terminal toast, Kitty OSC 99, iTerm2 OSC 9, and OSC 777, including tmux passthrough.
 - Preserves concise `cmd:` actions through the platform's default shell and supports `shell:` actions with an explicit interpreter.
-- Runs trusted `js:` actions in-process with access to Pi's public extension API, the event context, and the complete event object.
-- Optionally exposes `agent_notify({ title, content })` to the AI when the `pi_notify:agent_notify` hook has configured actions.
+- Runs trusted `js:` actions in-process with `pi`, `ctx`, causal `event`, and `notification` (including frozen `values` and `notification.osc`).
+- Optionally exposes `agent_notify({ title, content })` when `hooks["agent-notify"]` has at least one valid action; the tool is a pure producer of the `agent-notify` hook.
 - Keeps terminal and command actions fire-and-forget while awaiting JavaScript actions. One action failure does not prevent later actions from being attempted.
 
 ## Requirements
 
-- Pi 0.83.0 or newer with the public `agent_settled` and `tool_execution_start` events.
+- Pi 0.83.0 or newer with the public `agent_settled` and `tool_execution_start` events and `pi.events` bus.
 - Node.js 22.19.0 or newer.
 - The `tool_execution_start:ask_user_question` key expects the model-visible tool name `ask_user_question`, used by [`@juicesharp/rpiv-ask-user-question`](https://www.npmjs.com/package/@juicesharp/rpiv-ask-user-question).
 
@@ -37,23 +39,46 @@ pi -e /path/to/pi-notify/index.ts
 
 ## Configuration
 
-The configuration is a JSON object from supported event keys to ordered arrays of actions. Most actions are strings; an explicit-interpreter action is a flat tuple whose first item selects the interpreter and whose remaining items are exact arguments:
+Configuration is a nested JSON object with `events` (Pi lifecycle) and `hooks` (semantic hooks). Each binding is `{ "delayMs"?: number, "actions": [...] }`. `delayMs` defaults to `0` and must be a nonnegative safe integer within the Node timer maximum.
+
+This is a breaking shape: old flat top-level event keys and `pi_notify:agent_notify` are ignored with one bounded migration diagnostic.
 
 ```json
 {
-  "agent_settled": [
-    "osc",
-    "cmd:paplay /usr/share/sounds/freedesktop/stereo/complete.oga",
-    ["shell:/bin/bash", "-lc", "my-notify-script"]
-  ],
-  "tool_execution_start:ask_user_question": [
-    "osc:Pi|{{TOOL}} needs your input in {{CWD}}",
-    "js:ctx.ui.notify(`Question in ${notification.cwd}`, 'info')"
-  ],
-  "pi_notify:agent_notify": [
-    "osc:{{TITLE}}|{{CONTENT}}",
-    ["shell:powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Write-Output $env:PI_NOTIFY_CONTENT"]
-  ]
+  "events": {
+    "agent_settled": {
+      "delayMs": 0,
+      "actions": [
+        "osc",
+        "cmd:paplay /usr/share/sounds/freedesktop/stereo/complete.oga",
+        ["shell:/bin/bash", "-lc", "my-notify-script"]
+      ]
+    },
+    "tool_execution_start:ask_user_question": {
+      "actions": [
+        "osc:Pi|{{TOOL}} needs your input in {{CWD}}",
+        "js:ctx.ui.notify(`Question in ${notification.cwd}`, 'info')"
+      ]
+    }
+  },
+  "hooks": {
+    "agent-notify": {
+      "actions": [
+        "osc:{{TITLE}}|{{CONTENT}}",
+        ["shell:powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Write-Output $env:PI_NOTIFY_CONTENT"]
+      ]
+    },
+    "user-ready": {
+      "delayMs": 0,
+      "actions": [
+        "js:const kind = notification.values.STOP_KIND; if (kind === 'AI_UNLOCK') notification.osc('Pi', notification.values.REASON); else if (kind === 'EXHAUSTED') notification.osc('Pi', 'Continue watchdog exhausted'); else if (kind === 'DECISION_FAILED') notification.osc('Pi', 'Continue watchdog decision failed');"
+      ]
+    },
+    "build-finished": {
+      "delayMs": 1000,
+      "actions": ["osc:Build|{{RESULT}}"]
+    }
+  }
 }
 ```
 
@@ -63,30 +88,83 @@ The configuration is a JSON object from supported event keys to ordered arrays o
    - Default: `~/.pi/agent/pi-notify.json`
 2. Project: `<current Pi cwd>/.pi/pi-notify.json`
    - Read only when Pi reports the project as trusted.
-   - A project value replaces the global value for the same event key.
-   - Keys absent from the project file continue to use their global values.
+   - A project binding replaces the matching global binding as one complete `{ delayMs, actions }` unit.
+   - Nonmatching global event and hook bindings remain available.
+   - An invalid higher-precedence binding is ignored and does not erase a valid lower-precedence binding.
+   - An explicit empty `actions` array disables that binding.
 
-A missing file is an empty configuration. Invalid JSON, unsupported keys, and invalid actions produce a non-blocking warning and are ignored.
+A missing file is an empty configuration. Invalid JSON, unsupported lifecycle event names, invalid hook names, invalid actions, and invalid `delayMs` produce non-blocking warnings and are ignored.
 
-### Supported event keys
+### Lifecycle event keys
 
 | Key | When it fires |
 | --- | --- |
 | `agent_settled` | Pi is idle with no automatic retry, compaction, or queued continuation left to run. |
 | `tool_execution_start:ask_user_question` | The `ask_user_question` tool starts executing. Other tools do not match. |
-| `pi_notify:agent_notify` | The optional `agent_notify` AI tool is called. The tool is exposed only when this key contains at least one valid action. |
+
+### Semantic hooks
+
+Any extension may publish on:
+
+```text
+pi:semantic-hook:v1
+```
+
+Envelope:
+
+```json
+{
+  "version": 1,
+  "name": "build-finished",
+  "values": {
+    "RESULT": "SUCCESS"
+  }
+}
+```
+
+Rules:
+
+- `name` is lowercase kebab-case.
+- optional `values` keys are uppercase underscore identifiers with string values.
+- plain data only; no `ctx`, functions, callbacks, or plugin identity.
+- best-effort current-listener delivery only: no buffer, replay, ack, retry, or backpressure.
+- pi-notify routes `hooks[name]` with no semantic-name whitelist.
+- unconfigured names are silent; malformed envelopes produce a bounded warning.
+
+Consumer-owned fields for hooks:
+
+| Template | Command variable | Value |
+| --- | --- | --- |
+| `{{HOOK}}` | `PI_NOTIFY_HOOK` | `<name>` |
+| `{{EVENT}}` | `PI_NOTIFY_EVENT` | `hook:<name>` |
+
+Validated producer values become additional templates and `PI_NOTIFY_*` entries unless they collide with reserved consumer keys: `EVENT`, `HOOK`, `CWD`, `SESSION_ID`, `SESSION_FILE`, `TOOL`, `TOOL_CALL_ID`.
+
+Bare `osc` is valid only for lifecycle events (built-in default copy). Hook bindings reject bare `osc` with a config diagnostic; use `osc:<title>|<body>` or `notification.osc` in `js:`.
+
+### Binding delay
+
+Every received event or hook schedules its own independent timer:
+
+1. validate and copy immutable causal data (Pi event payload or semantic name/values) plus the chosen binding;
+2. wait `delayMs`;
+3. verify the consumer generation is still current;
+4. collect live cwd/session fields, a currently valid public `ExtensionContext`, and the inherited process environment;
+5. construct `PI_NOTIFY_*`, render templates, and execute actions.
+
+There is no debounce, replacement, coalescing, or revalidation against new activity. Reload/`session_shutdown` unsubscribes, cancels pending timers, and advances generation so late work cannot cause side effects.
 
 ### Actions
 
 | Action | Behavior |
 | --- | --- |
-| `osc` | Send the event's built-in terminal notification. |
+| `osc` | Lifecycle only: send the event's built-in terminal notification. |
 | `osc:<title>|<body>` | Send a terminal notification with template-expanded title and body. Both sides of `|` must be non-empty. |
 | `cmd:<shell command>` | Launch the command through the platform's default shell with the current Pi cwd and notification environment. The command must be non-empty. |
 | `["shell:<interpreter>", "arg1", ...]` | Resolve one explicit interpreter and launch it directly with the remaining strings as exact arguments. At least one argument is required. |
-| `js:<code>` | Await trusted JavaScript in the plugin process with `pi`, `ctx`, `event`, and `notification` in scope. The code must be non-empty. |
+| `js:<code>` | Await trusted JavaScript in the plugin process with `pi`, `ctx`, causal `event`, and `notification` in scope. The code must be non-empty. |
 
-Actions are started in array order and every action is attempted even if an earlier one fails. `osc`, `cmd:`, and `shell:` are fire-and-forget; command completion order and exit status are intentionally not observed. `js:` is awaited. Lifecycle-hook failures produce non-blocking warnings. `agent_notify` reports an aggregated tool error after all actions are attempted if JavaScript, synchronous OSC delivery, or synchronous process startup failed. Errors emitted later by a detached child remain warning-only.
+Actions are started in array order and every action is attempted even if an earlier one fails. `osc`, `cmd:`, and `shell:` are fire-and-forget; command completion order and exit status are intentionally not observed. `js:` is awaited. Lifecycle and hook consumer failures produce non-blocking warnings and never throw into Pi's bus or lifecycle.
 
 ## Templates and command environment
 
@@ -95,45 +173,34 @@ Actions are started in array order and every action is attempted even if an earl
 | Template | Command variable | Availability |
 | --- | --- | --- |
 | `{{EVENT}}` | `PI_NOTIFY_EVENT` | Always |
+| `{{HOOK}}` | `PI_NOTIFY_HOOK` | Semantic hooks only |
 | `{{CWD}}` | `PI_NOTIFY_CWD` | Always |
 | `{{SESSION_ID}}` | `PI_NOTIFY_SESSION_ID` | Always |
 | `{{SESSION_FILE}}` | `PI_NOTIFY_SESSION_FILE` | Persistent sessions only |
 | `{{TOOL}}` | `PI_NOTIFY_TOOL` | Tool events only |
 | `{{TOOL_CALL_ID}}` | `PI_NOTIFY_TOOL_CALL_ID` | Tool events only |
-| `{{TITLE}}` | `PI_NOTIFY_TITLE` | `agent_notify` only |
-| `{{CONTENT}}` | `PI_NOTIFY_CONTENT` | `agent_notify` only |
+| `{{TITLE}}` / `{{CONTENT}}` / other producer keys | matching `PI_NOTIFY_*` | When provided by a hook producer |
 
-If a template value is unavailable, its placeholder is preserved literally. For example, `{{TOOL}}` remains `{{TOOL}}` during `agent_settled`. A bare `osc` action under `pi_notify:agent_notify` uses the tool's title and content.
+If a template value is unavailable, its placeholder is preserved literally. The extension removes all inherited `PI_NOTIFY_*` values before adding the current context. Lifecycle tool arguments—including question text—are never copied into the command environment. A `js:` action intentionally receives the complete retained causal event, including tool arguments when present.
 
-Pi currently exposes no public project-name field to extensions, so `PI_NOTIFY_PROJECT` is deliberately unset. The extension also removes all inherited `PI_NOTIFY_*` values before adding the current fixed context. Lifecycle tool arguments—including question text—are never copied into the command environment. A `js:` action intentionally receives the complete raw event, including tool arguments.
+`cmd:` uses the platform shell (`/bin/sh` on Unix-like systems and `ComSpec`/`cmd.exe` on Windows).
 
-`cmd:` uses the platform shell (`/bin/sh` on Unix-like systems and `ComSpec`/`cmd.exe` on Windows). It is the shorthand for users who want to write only the shell program and do not need to choose an interpreter.
+A `shell:` tuple bypasses the host shell and calls the interpreter directly with `shell: false`. pi-notify does not add `-c`, `/c`, `-Command`, or any other argument. Only the bare interpreter name `powershell.exe` (case-insensitive) is resolved automatically on WSL.
 
-A `shell:` tuple bypasses the host shell and calls the interpreter directly with `shell: false`. pi-notify does not add `-c`, `/c`, `-Command`, or any other argument. It also does not split, join, expand, or otherwise reinterpret the argument strings. Supply every argument the chosen interpreter requires:
-
-```json
-{
-  "agent_settled": [
-    ["shell:/bin/bash", "-lc", "notify-send done"],
-    ["shell:powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Write-Output done"]
-  ]
-}
-```
-
-Pipes, redirections, variable expansion, and other shell syntax work only when the selected interpreter is explicitly asked to process them, such as `/bin/bash` with `-lc`. Otherwise each argument is passed literally. The spawned process receives the `PI_NOTIFY_*` environment independently of its arguments.
-
-Only the bare interpreter name `powershell.exe` (case-insensitive) is resolved automatically. On WSL, resolution checks `PATH`, then a `SystemRoot`/`WINDIR`-derived WSL path, then the standard path `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`. Explicit paths—including paths ending in `powershell.exe`—are preserved exactly. Windows Terminal toast notifications use the same bare-name resolver and fall back exactly once to terminal OSC when PowerShell cannot launch.
-
-`js:` compiles user-authored JavaScript as an async function. Its four lexical parameters are:
+### JavaScript notification context
 
 | Name | Value |
 | --- | --- |
 | `pi` | The plugin's public Pi `ExtensionAPI`. |
-| `ctx` | The public `ExtensionContext` for the current lifecycle event or tool call. |
-| `event` | The complete event object. For `agent_notify`, this describes that tool invocation and includes its arguments. |
-| `notification` | Structured notification context: event key, cwd, session fields, tool fields, and title/content when available. |
+| `ctx` | The public `ExtensionContext` collected at execution time (after any delay). |
+| `event` | Retained causal event or semantic envelope from receipt time. |
+| `notification` | Structured context: event key, optional hook name, cwd/session/tool fields, frozen `values`, and `osc(title, body)`. |
 
-Because `js:` runs in the Pi process, it has the current user's full permissions and can call powerful Pi APIs. Global and trusted-project configuration are executable code; review them as carefully as an extension. Do not use `js:` for untrusted content.
+`notification.values` is `{}` for lifecycle events and the frozen validated producer values for hooks (system keys stripped).
+
+`notification.osc(title, body)` reuses the shared OSC backend (Windows Terminal toast, WSL PowerShell resolution, Kitty/iTerm/OSC777/tmux) and participates in normal action error/continuation aggregation.
+
+Because `js:` runs in the Pi process, it has the current user's full permissions and can call powerful Pi APIs. Global and trusted-project configuration are executable code; review them as carefully as an extension.
 
 ## AI notification tool
 
@@ -143,9 +210,13 @@ The model-facing tool is disabled by default. It is registered as:
 agent_notify({ title: string, content: string })
 ```
 
-Only a non-empty `pi_notify:agent_notify` action list containing at least one valid action enables it. A missing key, an empty array, or an array whose entries are all invalid leaves the tool unavailable to the AI. Trusted project configuration follows normal replacement precedence, so a project hook replaces the global hook for that project.
+Only a non-empty `hooks["agent-notify"].actions` list containing at least one valid action enables it. The tool is an independent producer: it emits a fresh frozen envelope `{ version: 1, name: "agent-notify", values: { TITLE, CONTENT } }` on `pi:semantic-hook:v1` and returns exactly:
 
-The tool attempts every configured action before returning. It reports concise success when all awaited or synchronously launched actions succeed, or one aggregated Pi tool error when they do not. A fire-and-forget command that exits unsuccessfully later cannot be reflected in the tool result.
+```text
+Notification hook published
+```
+
+Successful synchronous construction and bus emit are enough for tool success. Synchronous emit failures become tool errors. Asynchronous consumer/action failures never feed back into the tool result; the generic router executes configured actions independently.
 
 ## Terminal support
 
@@ -177,7 +248,7 @@ npm test
 npm run typecheck
 ```
 
-Tests use Node's built-in `node:test` runner through `tsx`.
+Tests use Node's built-in `node:test` runner through `tsx`, including a packed-artifact E2E with an independent neutral producer.
 
 ## License
 

@@ -38,6 +38,7 @@ test("command launcher overlays fixed event context without leaking tool argumen
     sessionFile: "/sessions/one.jsonl",
     tool: "ask_user_question",
     toolCallId: "call-1",
+    values: {},
   });
   launch("notify --event \"$PI_NOTIFY_EVENT\"", "/work/app", env);
 
