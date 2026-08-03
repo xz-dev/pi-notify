@@ -6,6 +6,7 @@
   "files": [
     "index.ts",
     "src",
+    "skills",
     "README.md",
     "LICENSE"
   ],
