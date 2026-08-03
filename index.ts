@@ -4,10 +4,11 @@ import type {
   ToolExecutionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { join } from "node:path";
 
 import { runActions, type ActionRuntime, type JsActionScope } from "./src/actions.js";
+import { createBelLauncher } from "./src/bel.js";
 import { createCommandLauncher, createShellLauncher } from "./src/command.js";
 import { getHookBinding, loadConfig } from "./src/config.js";
 import { createOscLauncher } from "./src/osc.js";
@@ -48,6 +49,7 @@ export interface Scheduler {
 
 export interface NotificationRuntime {
   agentDir: string;
+  launchBel?: () => void;
   launchOsc: (title: string, body: string) => void;
   launchCommand: (command: string, cwd: string, environment: NotificationEnvironment) => void;
   launchShell: (
@@ -89,6 +91,7 @@ function createRuntime(): NotificationRuntime {
   const warn = (message: string) => process.stderr.write(`[pi-notify] ${message}\n`);
   return {
     agentDir: defaultAgentDir(),
+    launchBel: createBelLauncher(),
     launchOsc: createOscLauncher({ warn }),
     launchCommand: createCommandLauncher({ warn }),
     launchShell: createShellLauncher({ warn }),
@@ -99,6 +102,7 @@ function createRuntime(): NotificationRuntime {
 
 function toActionRuntime(runtime: NotificationRuntime): ActionRuntime {
   return {
+    launchBel: runtime.launchBel ?? createBelLauncher(),
     launchOsc: runtime.launchOsc,
     launchCommand: runtime.launchCommand,
     launchShell: runtime.launchShell,
@@ -130,6 +134,7 @@ function buildLifecycleNotification(
   return {
     event: key,
     cwd: ctx.cwd,
+    hostname: (process.env.HOSTNAME ?? hostname()).trim() || "unknown-host",
     sessionId: ctx.sessionManager.getSessionId(),
     sessionFile: ctx.sessionManager.getSessionFile(),
     values: Object.freeze({}),
@@ -143,6 +148,7 @@ function buildHookNotification(name: string, values: Readonly<Record<string, str
     event: `hook:${name}`,
     hook: name,
     cwd: ctx.cwd,
+    hostname: (process.env.HOSTNAME ?? hostname()).trim() || "unknown-host",
     sessionId: ctx.sessionManager.getSessionId(),
     sessionFile: ctx.sessionManager.getSessionFile(),
     values: copyProducerValues(values),

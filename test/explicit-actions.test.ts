@@ -617,9 +617,45 @@ test("awaited js action receives pi, ctx, full event, notification and later act
   assert.deepEqual(seen[0]?.event, event);
   assert.equal((seen[0]?.notification as any).event, "tool_execution_start:ask_user_question");
   assert.equal((seen[0]?.notification as any).tool, "ask_user_question");
+  assert.equal(typeof (seen[0]?.notification as any).bel, "function");
   assert.equal(typeof (seen[0]?.notification as any).osc, "function");
   assert.deepEqual((seen[0]?.notification as any).values, {});
   assert.equal(launches[0], "after");
+});
+
+test("BEL actions and notification.bel use the same backend for events and hooks", async () => {
+  const { agentDir, cwd } = await fixture();
+  await writeFile(
+    join(agentDir, "pi-notify.json"),
+    JSON.stringify({
+      events: {
+        agent_settled: { actions: ["bel", "cmd:after-event"] },
+      },
+      hooks: {
+        "user-ready": { actions: ["bel", "js:notification.bel()", "cmd:after-hook"] },
+      },
+    }),
+  );
+
+  const { handlers, pi } = createPiHarness();
+  const launches: string[] = [];
+  registerExtension(pi, {
+    agentDir,
+    launchBel: () => launches.push("bel"),
+    launchOsc: () => undefined,
+    launchCommand: (command) => launches.push(command),
+    launchShell: () => undefined,
+    warn: () => undefined,
+  });
+
+  const ctx = makeCtx(cwd);
+  await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+  await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+  await flush();
+  pi.events.emit(SEMANTIC_HOOK_CHANNEL, { version: 1, name: "user-ready" });
+  await flush();
+
+  assert.deepEqual(launches, ["bel", "after-event", "bel", "bel", "after-hook"]);
 });
 
 test("missing empty or all-invalid agent-notify hook does not register the tool", async () => {
@@ -714,6 +750,7 @@ test("valid agent-notify hook registers once, publishes envelope, and consumer g
   assert.equal(shell?.env?.PI_NOTIFY_HOOK, "agent-notify");
 
   assert.equal(jsScopes.length, 1);
+  assert.equal(typeof jsScopes[0].notification.bel, "function");
   assert.equal(jsScopes[0].notification.values.TITLE, "Ship");
   assert.equal(jsScopes[0].notification.values.CONTENT, "Ready");
   assert.equal(jsScopes[0].event.name, "agent-notify");

@@ -9,6 +9,7 @@ export type LifecycleEventKey = (typeof LIFECYCLE_EVENT_KEYS)[number];
 export type ShellTupleAction = readonly [shellSpec: `shell:${string}`, ...args: string[]];
 
 export type NotificationAction =
+  | "bel"
   | "osc"
   | `osc:${string}`
   | `cmd:${string}`
@@ -30,6 +31,7 @@ export const SYSTEM_TEMPLATE_KEYS = [
   "EVENT",
   "HOOK",
   "CWD",
+  "HOSTNAME",
   "SESSION_ID",
   "SESSION_FILE",
   "TOOL",
@@ -47,6 +49,8 @@ export interface NotificationContext {
   event: string;
   hook?: string;
   cwd: string;
+  /** Live hostname collected when the delayed binding executes. */
+  hostname?: string;
   sessionId: string;
   sessionFile?: string;
   tool?: string;
@@ -56,6 +60,8 @@ export interface NotificationContext {
 }
 
 export interface JsNotificationContext extends NotificationContext {
+  /** Emit one terminal BEL; participates in action error aggregation. */
+  bel: () => void;
   /** Invoke the shared OSC backend; participates in action error aggregation. */
   osc: (title: string, body: string) => void;
 }

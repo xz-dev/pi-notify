@@ -92,7 +92,7 @@ Protocol rules:
 - Consumers treat the complete envelope as transitively read-only and copy any data retained past the callback.
 - No `ctx`, functions, callbacks, class instances, extension objects, state handles, or plugin identity enter the envelope.
 - Consumers validate before acting. Unknown versions, invalid envelopes, and unconfigured names are ignored safely.
-- Consumer-owned context keys such as `EVENT`, `HOOK`, `CWD`, `SESSION_ID`, `SESSION_FILE`, `TOOL`, and `TOOL_CALL_ID` cannot be overwritten by producer values.
+- Consumer-owned context keys such as `EVENT`, `HOOK`, `CWD`, `HOSTNAME`, `SESSION_ID`, `SESSION_FILE`, `TOOL`, and `TOOL_CALL_ID` cannot be overwritten by producer values.
 
 ## Delivery semantics
 

@@ -13,6 +13,7 @@ import type {
 } from "./types.js";
 
 export interface ActionRuntime {
+  launchBel: () => void;
   launchOsc: (title: string, body: string) => void;
   launchCommand: (command: string, cwd: string, environment: NotificationEnvironment) => void;
   launchShell: (
@@ -94,6 +95,7 @@ function resolveShellInterpreter(interpreter: string, runtime: ActionRuntime): s
 
 function actionLabel(action: NotificationAction): string {
   if (isShellTupleAction(action)) return "shell";
+  if (action === "bel") return "bel";
   if (action === "osc" || action.startsWith("osc:")) return "osc";
   if (action.startsWith("cmd:")) return "cmd";
   if (action.startsWith("js:")) return "js";
@@ -107,20 +109,27 @@ function buildJsNotification(
   isCurrent?: () => boolean,
 ): JsNotificationContext {
   const values = Object.freeze({ ...(notification.values ?? {}) });
+  const launch = (label: "bel" | "osc", operation: () => void): void => {
+    if (isCurrent && !isCurrent()) return;
+    try {
+      operation();
+    } catch (error) {
+      // Record once for aggregate reporting; still rethrow so surrounding js can observe.
+      const message = error instanceof Error ? error.message : String(error);
+      const failure = `${label}: ${message}`;
+      if (!failures.includes(failure)) failures.push(failure);
+      throw error instanceof Error ? error : new Error(message);
+    }
+  };
+
   return {
     ...notification,
     values,
+    bel(): void {
+      launch("bel", runtime.launchBel);
+    },
     osc(title: string, body: string): void {
-      if (isCurrent && !isCurrent()) return;
-      try {
-        runtime.launchOsc(title, body);
-      } catch (error) {
-        // Record once for aggregate reporting; still rethrow so surrounding js can observe.
-        const message = error instanceof Error ? error.message : String(error);
-        const failure = `osc: ${message}`;
-        if (!failures.includes(failure)) failures.push(failure);
-        throw error instanceof Error ? error : new Error(message);
-      }
+      launch("osc", () => runtime.launchOsc(title, body));
     },
   };
 }
@@ -142,6 +151,11 @@ export async function runActions(options: RunActionsOptions): Promise<void> {
         const { interpreter, args } = parseShellTuple(action);
         const resolved = resolveShellInterpreter(interpreter, runtime);
         runtime.launchShell(resolved, args, notification.cwd, environment);
+        continue;
+      }
+
+      if (action === "bel") {
+        runtime.launchBel();
         continue;
       }
 
@@ -173,12 +187,13 @@ export async function runActions(options: RunActionsOptions): Promise<void> {
       const message = error instanceof Error ? error.message : String(error);
       const label = actionLabel(action);
       const failure = `${label}: ${message}`;
-      // notification.osc already recorded `osc: …`; do not also count/report as js failure.
-      const alreadyRecordedAsOsc = label === "js" && failures.includes(`osc: ${message}`);
-      if (!alreadyRecordedAsOsc && !failures.includes(failure)) failures.push(failure);
-      if (!throwOnFailure && !alreadyRecordedAsOsc) {
-        // CommandLaunchError already warned at the launcher.
-        if (!(error instanceof CommandLaunchError) && label !== "osc") {
+      // notification.bel/osc already recorded their own failure; do not also count/report as js failure.
+      const alreadyRecordedByHelper =
+        label === "js" && (failures.includes(`bel: ${message}`) || failures.includes(`osc: ${message}`));
+      if (!alreadyRecordedByHelper && !failures.includes(failure)) failures.push(failure);
+      if (!throwOnFailure && !alreadyRecordedByHelper) {
+        // CommandLaunchError already warned at the launcher. Terminal actions report through the aggregate below.
+        if (!(error instanceof CommandLaunchError) && label !== "bel" && label !== "osc") {
           runtime.warn(`Notification action failed (${label}): ${message}`);
         }
       }

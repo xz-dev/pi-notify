@@ -1,18 +1,33 @@
 import assert from "node:assert/strict";
+import { hostname } from "node:os";
 import test from "node:test";
 
+import { createBelLauncher } from "../src/bel.js";
 import { createNotificationEnvironment, renderTemplate } from "../src/context.js";
 import { createOscLauncher } from "../src/osc.js";
 import { createCommandLauncher } from "../src/command.js";
+
+test("BEL launcher writes exactly one standard terminal BEL", () => {
+  const writes: string[] = [];
+  const launch = createBelLauncher({ write: (value) => writes.push(value) });
+
+  launch();
+
+  assert.deepEqual(writes, ["\x07"]);
+});
 
 test("templates use command-context names and preserve unavailable placeholders", () => {
   const values = {
     EVENT: "agent_settled",
     CWD: "/work/app",
+    HOSTNAME: "example-host",
     SESSION_ID: "session-1",
   };
 
-  assert.equal(renderTemplate("{{EVENT}} in {{CWD}} for {{TOOL}}", values), "agent_settled in /work/app for {{TOOL}}");
+  assert.equal(
+    renderTemplate("{{EVENT}} on {{HOSTNAME}} in {{CWD}} for {{TOOL}}", values),
+    "agent_settled on example-host in /work/app for {{TOOL}}",
+  );
 });
 
 test("command launcher overlays fixed event context without leaking tool arguments", () => {
@@ -50,6 +65,7 @@ test("command launcher overlays fixed event context without leaking tool argumen
       PATH: "/bin",
       PI_NOTIFY_CWD: "/work/app",
       PI_NOTIFY_EVENT: "tool_execution_start:ask_user_question",
+      PI_NOTIFY_HOSTNAME: (process.env.HOSTNAME ?? hostname()).trim() || "unknown-host",
       PI_NOTIFY_SESSION_FILE: "/sessions/one.jsonl",
       PI_NOTIFY_SESSION_ID: "session-1",
       PI_NOTIFY_TOOL: "ask_user_question",

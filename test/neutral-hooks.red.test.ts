@@ -299,6 +299,7 @@ test("hook routing sets HOOK/EVENT, merges values, protects system keys", async 
       EVENT: "spoof-event",
       HOOK: "spoof-hook",
       CWD: "spoof-cwd",
+      HOSTNAME: "spoof-host",
       SESSION_ID: "spoof-session",
       TITLE: "ignored-as-system-or-allowed?",
     },
@@ -317,9 +318,11 @@ test("hook routing sets HOOK/EVENT, merges values, protects system keys", async 
   assert.notEqual(cmd?.env?.PI_NOTIFY_EVENT, "spoof-event");
   assert.notEqual(cmd?.env?.PI_NOTIFY_HOOK, "spoof-hook");
   assert.notEqual(cmd?.env?.PI_NOTIFY_CWD, "spoof-cwd");
+  assert.notEqual(cmd?.env?.PI_NOTIFY_HOSTNAME, "spoof-host");
   assert.equal(jsScopes[0]?.notification.values.STOP_KIND, "AI_UNLOCK");
   assert.equal(jsScopes[0]?.notification.values.EVENT, undefined);
   assert.equal(Object.isFrozen(jsScopes[0]?.notification.values), true);
+  assert.equal(typeof jsScopes[0]?.notification.bel, "function");
   assert.equal(typeof jsScopes[0]?.notification.osc, "function");
 
   const before = warnings.length;
@@ -513,6 +516,48 @@ test("notification.osc reuses backend and continues after errors; values are fro
   assert.deepEqual(oscCalls, [{ title: "A", body: "Waiting" }]);
   assert.deepEqual(commands, ["after-js"]);
   assert.ok(warnings.some((entry) => entry.includes("after-osc")));
+});
+
+test("notification.bel backend failure aggregates once, remains catchable, and later actions run", async () => {
+  const { agentDir, cwd } = await fixture();
+  await writeFile(
+    join(agentDir, "pi-notify.json"),
+    JSON.stringify({
+      hooks: {
+        "user-ready": {
+          actions: [
+            "js:try { notification.bel(); } catch (error) { globalThis.__belCaught = String(error); }",
+            "cmd:after-bel-fail",
+          ],
+        },
+      },
+    }),
+  );
+
+  const { handlers, pi } = createPiHarness();
+  const commands: string[] = [];
+  const warnings: string[] = [];
+  delete (globalThis as { __belCaught?: string }).__belCaught;
+  registerExtension(pi, {
+    agentDir,
+    launchBel: () => {
+      throw new Error("bel-backend-down");
+    },
+    launchOsc: () => undefined,
+    launchCommand: (command) => commands.push(command),
+    launchShell: () => undefined,
+    warn: (message) => warnings.push(message),
+  });
+  await handlers.get("session_start")?.({ type: "session_start" }, makeCtx(cwd));
+  pi.events.emit(SEMANTIC_HOOK_CHANNEL, { version: 1, name: "user-ready" });
+  await flushAsync(20);
+
+  assert.deepEqual(commands, ["after-bel-fail"]);
+  assert.match(String((globalThis as { __belCaught?: string }).__belCaught), /bel-backend-down/);
+  const aggregate = warnings.filter((entry) => /reported 1 failure\(s\): bel: bel-backend-down/.test(entry));
+  assert.equal(aggregate.length, 1);
+  assert.equal(warnings.filter((entry) => entry.includes("bel-backend-down")).length, 1);
+  delete (globalThis as { __belCaught?: string }).__belCaught;
 });
 
 test("notification.osc backend failure aggregates once, still throws into js, later actions run", async () => {

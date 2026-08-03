@@ -62,6 +62,33 @@ test("untrusted projects cannot contribute bindings", async () => {
   assert.deepEqual(config.events.agent_settled, { delayMs: 0, actions: ["osc"] });
 });
 
+test("BEL is a first-class action for lifecycle events and semantic hooks", async () => {
+  const { agentDir, cwd } = await fixture();
+  await writeFile(
+    join(agentDir, "pi-notify.json"),
+    JSON.stringify({
+      events: {
+        agent_settled: { actions: ["osc", "bel"] },
+      },
+      hooks: {
+        "user-ready": { actions: ["bel"] },
+      },
+    }),
+  );
+
+  const warnings: string[] = [];
+  const config = await loadConfig({
+    agentDir,
+    cwd,
+    projectTrusted: false,
+    warn: (message) => warnings.push(message),
+  });
+
+  assert.deepEqual(config.events.agent_settled, { delayMs: 0, actions: ["osc", "bel"] });
+  assert.deepEqual(config.hooks["user-ready"], { delayMs: 0, actions: ["bel"] });
+  assert.deepEqual(warnings, []);
+});
+
 test("invalid keys and actions are warned about and ignored; legacy top-level migrates once", async () => {
   const { agentDir, cwd } = await fixture();
   await writeFile(

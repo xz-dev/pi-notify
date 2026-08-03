@@ -98,6 +98,8 @@ Restart Pi after installation or use Pi's supported reload flow.
 
 ## Configuration
 
+The inline `js:` remains here because this recipe needs conditional `STOP_KIND` routing, shared sanitization, and independent OSC/ntfy delivery. For ordinary fixed text, prefer the built-in `bel`, templated `osc:`, and structured `shell:` actions shown in the other examples.
+
 Write the following nested config to `$PI_CODING_AGENT_DIR/pi-notify.json` (normally `~/.pi/agent/pi-notify.json`). Replace `YOUR_PRIVATE_TOPIC`; an ntfy topic URL should be treated like a credential and must not be committed.
 
 ```json
@@ -106,12 +108,14 @@ Write the following nested config to `$PI_CODING_AGENT_DIR/pi-notify.json` (norm
     "user-ready": {
       "delayMs": 0,
       "actions": [
+        "bel",
         "js:const cleanBody=(value)=>String(value??'').replace(/\\r\\n?/g,'\\n').replace(/[\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f]/g,'');const cleanHeader=(value)=>String(value??'').replace(/[\\r\\n\\u2028\\u2029]+/g,' ').replace(/[\\u0000-\\u001f\\u007f-\\u009f]/g,'');const warn=()=>{try{process.stderr.write('[pi-notify-config] Cannot launch ntfy\\n')}catch{}};const publish=(rawTitle,rawMessage,semanticTag)=>{const cwd=cleanHeader(notification.cwd);const sessionId=cleanHeader(notification.sessionId);const rawHostname=process.env.HOSTNAME??process.getBuiltinModule('os').hostname();const hostname=cleanHeader(rawHostname).trim()||'unknown-host';const hostnameTag=hostname.toLowerCase().replace(/[^a-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'')||'unknown-host';const title=cleanHeader(rawTitle)+' · '+hostname+' · '+cwd;const body=cleanBody(rawMessage)+'\\nsession id: '+sessionId;const tags=semanticTag+','+hostnameTag;try{notification.osc(title,body)}catch{}try{const child=process.getBuiltinModule('child_process').spawn('curl',['-fsS','--max-time','15','-o','/dev/null','-H','Title: '+title,'-H','Tags: '+tags,'--data-raw',body,'https://ntfy.sh/YOUR_PRIVATE_TOPIC'],{detached:true,stdio:'ignore',windowsHide:true,shell:false});child.once('error',warn);child.unref()}catch{warn()}};const kind=notification.values.STOP_KIND;if(kind==='AI_UNLOCK')publish('🙋 Pi Done',notification.values.REASON,'done');else if(kind==='EXHAUSTED')publish('🛑 Pi Continue stopped','Continue watchdog retry limit reached','retry-limit');else if(kind==='DECISION_FAILED')publish('⚠️ Pi Continue failed','Continue watchdog decision failed','decision-failed')"
       ]
     },
     "agent-notify": {
       "delayMs": 0,
       "actions": [
+        "bel",
         "js:const cleanBody=(value)=>String(value??'').replace(/\\r\\n?/g,'\\n').replace(/[\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f]/g,'');const cleanHeader=(value)=>String(value??'').replace(/[\\r\\n\\u2028\\u2029]+/g,' ').replace(/[\\u0000-\\u001f\\u007f-\\u009f]/g,'');const warn=()=>{try{process.stderr.write('[pi-notify-config] Cannot launch ntfy\\n')}catch{}};const publish=(rawTitle,rawMessage,semanticTag)=>{const cwd=cleanHeader(notification.cwd);const sessionId=cleanHeader(notification.sessionId);const rawHostname=process.env.HOSTNAME??process.getBuiltinModule('os').hostname();const hostname=cleanHeader(rawHostname).trim()||'unknown-host';const hostnameTag=hostname.toLowerCase().replace(/[^a-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'')||'unknown-host';const title=cleanHeader(rawTitle)+' · '+hostname+' · '+cwd;const body=cleanBody(rawMessage)+'\\nsession id: '+sessionId;const tags=semanticTag+','+hostnameTag;try{notification.osc(title,body)}catch{}try{const child=process.getBuiltinModule('child_process').spawn('curl',['-fsS','--max-time','15','-o','/dev/null','-H','Title: '+title,'-H','Tags: '+tags,'--data-raw',body,'https://ntfy.sh/YOUR_PRIVATE_TOPIC'],{detached:true,stdio:'ignore',windowsHide:true,shell:false});child.once('error',warn);child.unref()}catch{warn()}};if(typeof notification.values.TITLE==='string'&&typeof notification.values.CONTENT==='string')publish('🤖 '+notification.values.TITLE,notification.values.CONTENT,'agent')"
       ]
     }

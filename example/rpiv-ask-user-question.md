@@ -44,6 +44,8 @@ Restart Pi after installation or use Pi's supported reload flow.
 
 ## Configuration
 
+The inline `js:` below is retained for the full OSC/ntfy parity recipe: it builds one sanitized hostname-tagged payload and sends it independently to both transports. If you only need terminal notification, prefer `"bel"` plus a templated `osc:` action as shown in the README.
+
 Write the following nested config to `$PI_CODING_AGENT_DIR/pi-notify.json` (normally `~/.pi/agent/pi-notify.json`). If the file already contains `hooks`, merge this `events` object instead of replacing unrelated bindings.
 
 Replace `YOUR_PRIVATE_TOPIC`; treat a real ntfy topic URL like a credential.
@@ -54,6 +56,7 @@ Replace `YOUR_PRIVATE_TOPIC`; treat a real ntfy topic URL like a credential.
     "tool_execution_start:ask_user_question": {
       "delayMs": 0,
       "actions": [
+        "bel",
         "js:const cleanBody=(value)=>String(value??'').replace(/\\r\\n?/g,'\\n').replace(/[\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f]/g,'');const cleanHeader=(value)=>String(value??'').replace(/[\\r\\n\\u2028\\u2029]+/g,' ').replace(/[\\u0000-\\u001f\\u007f-\\u009f]/g,'');const warn=()=>{try{process.stderr.write('[pi-notify-config] Cannot launch ntfy\\n')}catch{}};const publish=(rawTitle,rawMessage,semanticTag)=>{const cwd=cleanHeader(notification.cwd);const sessionId=cleanHeader(notification.sessionId);const rawHostname=process.env.HOSTNAME??process.getBuiltinModule('os').hostname();const hostname=cleanHeader(rawHostname).trim()||'unknown-host';const hostnameTag=hostname.toLowerCase().replace(/[^a-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'')||'unknown-host';const title=cleanHeader(rawTitle)+' · '+hostname+' · '+cwd;const body=cleanBody(rawMessage)+'\\nsession id: '+sessionId;const tags=semanticTag+','+hostnameTag;try{notification.osc(title,body)}catch{}try{const child=process.getBuiltinModule('child_process').spawn('curl',['-fsS','--max-time','15','-o','/dev/null','-H','Title: '+title,'-H','Tags: '+tags,'--data-raw',body,'https://ntfy.sh/YOUR_PRIVATE_TOPIC'],{detached:true,stdio:'ignore',windowsHide:true,shell:false});child.once('error',warn);child.unref()}catch{warn()}};const cwd=cleanHeader(notification.cwd);publish('❓ Pi Question',String(notification.tool)+' needs your input in '+cwd,'input-required')"
       ]
     }

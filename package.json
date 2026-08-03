@@ -7,6 +7,7 @@
     "index.ts",
     "src",
     "skills",
+    "example",
     "README.md",
     "LICENSE"
   ],
@@ -39,6 +40,7 @@
     "pi-package",
     "pi-extension",
     "notification",
+    "bel",
     "osc",
     "terminal"
   ],

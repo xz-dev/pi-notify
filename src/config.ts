@@ -54,7 +54,7 @@ export function isShellTupleAction(value: unknown): value is ShellTupleAction {
 }
 
 function isStringAction(value: unknown): value is Exclude<NotificationAction, ShellTupleAction> {
-  if (value === "osc") return true;
+  if (value === "bel" || value === "osc") return true;
   if (typeof value !== "string") return false;
   if (value.length > MAX_ACTION_TEXT_LENGTH) return false;
   if (value.startsWith("cmd:")) return value.slice(4).trim().length > 0;

@@ -128,13 +128,13 @@ The target configuration is intentionally split into Pi lifecycle events and sem
   "events": {
     "tool_execution_start:ask_user_question": {
       "delayMs": 0,
-      "actions": ["osc"]
+      "actions": ["bel", "osc"]
     }
   },
   "hooks": {
     "build-finished": {
       "delayMs": 0,
-      "actions": ["osc:Build|{{RESULT}}"]
+      "actions": ["bel", "osc:Build|{{RESULT}}"]
     }
   }
 }
@@ -205,7 +205,7 @@ if (kind === "AI_UNLOCK") {
 }
 ```
 
-`notification.osc(title, body)` must reuse pi-notify's existing safe Windows Terminal, WSL PowerShell, Kitty, iTerm2, OSC 777, and tmux backend. Treat producer values as untrusted display/command inputs and quote command usage correctly.
+Use bare `bel` for unconditional terminal attention; it is valid for both lifecycle events and hooks and emits one standard terminal BEL. For conditional trusted JavaScript, `notification.bel()` uses the same backend. `notification.osc(title, body)` must reuse pi-notify's existing safe Windows Terminal, WSL PowerShell, Kitty, iTerm2, OSC 777, and tmux backend. Treat producer values as untrusted display/command inputs and quote command usage correctly.
 
 ## Independence and Security
 
@@ -219,7 +219,7 @@ Never:
 - expose secrets in hook values, tests, logs, commits, or reports;
 - edit `~/.pi/agent/git/...` installed checkouts directly.
 
-Trusted project configuration is executable code when it contains `js:` or process actions. Preserve Pi's project-trust gate. Producer values cannot override consumer-owned `EVENT`, `HOOK`, `CWD`, `SESSION_ID`, `SESSION_FILE`, `TOOL`, or `TOOL_CALL_ID`.
+Trusted project configuration is executable code when it contains `js:` or process actions. Preserve Pi's project-trust gate. Producer values cannot override consumer-owned `EVENT`, `HOOK`, `CWD`, `HOSTNAME`, `SESSION_ID`, `SESSION_FILE`, `TOOL`, or `TOOL_CALL_ID`.
 
 ## ATDD and TDD
 
@@ -254,7 +254,7 @@ Add a representative acceptance test and run it against the baseline to prove RE
 - `pi.events.emit()` does not await asynchronous consumers.
 - Removing a listener cannot cancel consumer work already in flight.
 - A fake clock must advance `now()` when runtime timers use deadlines/chunking.
-- A bare hook `osc` has no semantic-specific default text; configure explicit text, or use `notification.osc`.
+- A bare hook `osc` has no semantic-specific default text; configure explicit text, or use `notification.osc`. Bare hook `bel` is valid because it carries no text.
 - Do not add a delay after an already-authoritative producer boundary merely to guess whether work resumes.
 
 ## Completion Checklist

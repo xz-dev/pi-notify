@@ -1,3 +1,5 @@
+import { hostname } from "node:os";
+
 import {
   SYSTEM_TEMPLATE_KEYS,
   type NotificationContext,
@@ -7,10 +9,15 @@ import {
 
 const systemKeySet = new Set<string>(SYSTEM_TEMPLATE_KEYS);
 
+function currentHostname(): string {
+  return (process.env.HOSTNAME ?? hostname()).trim() || "unknown-host";
+}
+
 export function createTemplateValues(context: NotificationContext): TemplateValues {
   const values: TemplateValues = {
     EVENT: context.event,
     CWD: context.cwd,
+    HOSTNAME: context.hostname ?? currentHostname(),
     SESSION_ID: context.sessionId,
   };
 

@@ -11,9 +11,9 @@ Inspired by [ferologics/pi-notify](https://github.com/ferologics/pi-notify).
 - Consumes neutral semantic hooks on the public `pi:semantic-hook:v1` bus without a hook-name whitelist or producer identity.
 - Loads nested global configuration plus optional trusted-project whole-unit overrides.
 - Supports per-binding `delayMs` with retain-causal → delay → collect-live → execute semantics (no debounce/dedup).
-- Supports terminal notifications through Windows Terminal toast, Kitty OSC 99, iTerm2 OSC 9, and OSC 777, including tmux passthrough.
+- Supports first-class terminal BEL plus Windows Terminal toast, Kitty OSC 99, iTerm2 OSC 9, and OSC 777, including tmux passthrough.
 - Preserves concise `cmd:` actions through the platform's default shell and supports `shell:` actions with an explicit interpreter.
-- Runs trusted `js:` actions in-process with `pi`, `ctx`, causal `event`, and `notification` (including frozen `values` and `notification.osc`).
+- Runs trusted `js:` actions in-process with `pi`, `ctx`, causal `event`, and `notification` (including frozen `values`, `notification.bel()`, and `notification.osc()`).
 - Optionally exposes `agent_notify({ title, content })` when `hooks["agent-notify"]` has at least one valid action; the tool is a pure producer of the `agent-notify` hook.
 - Keeps terminal and command actions fire-and-forget while awaiting JavaScript actions. One action failure does not prevent later actions from being attempted.
 
@@ -49,6 +49,7 @@ This is a breaking shape: old flat top-level event keys and `pi_notify:agent_not
     "agent_settled": {
       "delayMs": 0,
       "actions": [
+        "bel",
         "osc",
         "cmd:paplay /usr/share/sounds/freedesktop/stereo/complete.oga",
         ["shell:/bin/bash", "-lc", "my-notify-script"]
@@ -56,14 +57,15 @@ This is a breaking shape: old flat top-level event keys and `pi_notify:agent_not
     },
     "tool_execution_start:ask_user_question": {
       "actions": [
-        "osc:Pi|{{TOOL}} needs your input in {{CWD}}",
-        "js:ctx.ui.notify(`Question in ${notification.cwd}`, 'info')"
+        "bel",
+        "osc:Pi|{{TOOL}} needs your input in {{CWD}}"
       ]
     }
   },
   "hooks": {
     "agent-notify": {
       "actions": [
+        "bel",
         "osc:{{TITLE}}|{{CONTENT}}",
         ["shell:powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Write-Output $env:PI_NOTIFY_CONTENT"]
       ]
@@ -71,12 +73,13 @@ This is a breaking shape: old flat top-level event keys and `pi_notify:agent_not
     "user-ready": {
       "delayMs": 0,
       "actions": [
+        "bel",
         "js:const kind = notification.values.STOP_KIND; if (kind === 'AI_UNLOCK') notification.osc('Pi', notification.values.REASON); else if (kind === 'EXHAUSTED') notification.osc('Pi', 'Continue watchdog exhausted'); else if (kind === 'DECISION_FAILED') notification.osc('Pi', 'Continue watchdog decision failed');"
       ]
     },
     "build-finished": {
       "delayMs": 1000,
-      "actions": ["osc:Build|{{RESULT}}"]
+      "actions": ["bel", "osc:Build|{{RESULT}}"]
     }
   }
 }
@@ -138,9 +141,9 @@ Consumer-owned fields for hooks:
 | `{{HOOK}}` | `PI_NOTIFY_HOOK` | `<name>` |
 | `{{EVENT}}` | `PI_NOTIFY_EVENT` | `hook:<name>` |
 
-Validated producer values become additional templates and `PI_NOTIFY_*` entries unless they collide with reserved consumer keys: `EVENT`, `HOOK`, `CWD`, `SESSION_ID`, `SESSION_FILE`, `TOOL`, `TOOL_CALL_ID`.
+Validated producer values become additional templates and `PI_NOTIFY_*` entries unless they collide with reserved consumer keys: `EVENT`, `HOOK`, `CWD`, `HOSTNAME`, `SESSION_ID`, `SESSION_FILE`, `TOOL`, `TOOL_CALL_ID`.
 
-Bare `osc` is valid only for lifecycle events (built-in default copy). Hook bindings reject bare `osc` with a config diagnostic; use `osc:<title>|<body>` or `notification.osc` in `js:`.
+Bare `osc` is valid only for lifecycle events (built-in default copy). Hook bindings reject bare `osc` with a config diagnostic; use `osc:<title>|<body>` or `notification.osc` in `js:`. Bare `bel` is valid for both lifecycle events and hooks because it has no text payload or event-specific default.
 
 ### Binding delay
 
@@ -158,13 +161,14 @@ There is no debounce, replacement, coalescing, or revalidation against new activ
 
 | Action | Behavior |
 | --- | --- |
+| `bel` | Emit one standard terminal BEL (`U+0007`). Valid for lifecycle events and semantic hooks; the terminal decides whether it is audible, visual, or a taskbar attention flash. |
 | `osc` | Lifecycle only: send the event's built-in terminal notification. |
 | `osc:<title>|<body>` | Send a terminal notification with template-expanded title and body. Both sides of `|` must be non-empty. |
 | `cmd:<shell command>` | Launch the command through the platform's default shell with the current Pi cwd and notification environment. The command must be non-empty. |
 | `["shell:<interpreter>", "arg1", ...]` | Resolve one explicit interpreter and launch it directly with the remaining strings as exact arguments. At least one argument is required. |
 | `js:<code>` | Await trusted JavaScript in the plugin process with `pi`, `ctx`, causal `event`, and `notification` in scope. The code must be non-empty. |
 
-Actions are started in array order and every action is attempted even if an earlier one fails. `osc`, `cmd:`, and `shell:` are fire-and-forget; command completion order and exit status are intentionally not observed. `js:` is awaited. Lifecycle and hook consumer failures produce non-blocking warnings and never throw into Pi's bus or lifecycle.
+Actions are started in array order and every action is attempted even if an earlier one fails. `bel`, `osc`, `cmd:`, and `shell:` are fire-and-forget; command completion order and exit status are intentionally not observed. `js:` is awaited. Lifecycle and hook consumer failures produce non-blocking warnings and never throw into Pi's bus or lifecycle.
 
 ## Templates and command environment
 
@@ -175,6 +179,7 @@ Actions are started in array order and every action is attempted even if an earl
 | `{{EVENT}}` | `PI_NOTIFY_EVENT` | Always |
 | `{{HOOK}}` | `PI_NOTIFY_HOOK` | Semantic hooks only |
 | `{{CWD}}` | `PI_NOTIFY_CWD` | Always |
+| `{{HOSTNAME}}` | `PI_NOTIFY_HOSTNAME` | Always |
 | `{{SESSION_ID}}` | `PI_NOTIFY_SESSION_ID` | Always |
 | `{{SESSION_FILE}}` | `PI_NOTIFY_SESSION_FILE` | Persistent sessions only |
 | `{{TOOL}}` | `PI_NOTIFY_TOOL` | Tool events only |
@@ -194,11 +199,11 @@ A `shell:` tuple bypasses the host shell and calls the interpreter directly with
 | `pi` | The plugin's public Pi `ExtensionAPI`. |
 | `ctx` | The public `ExtensionContext` collected at execution time (after any delay). |
 | `event` | Retained causal event or semantic envelope from receipt time. |
-| `notification` | Structured context: event key, optional hook name, cwd/session/tool fields, frozen `values`, and `osc(title, body)`. |
+| `notification` | Structured context: event key, optional hook name, cwd/hostname/session/tool fields, frozen `values`, `bel()`, and `osc(title, body)`. |
 
 `notification.values` is `{}` for lifecycle events and the frozen validated producer values for hooks (system keys stripped).
 
-`notification.osc(title, body)` reuses the shared OSC backend (Windows Terminal toast, WSL PowerShell resolution, Kitty/iTerm/OSC777/tmux) and participates in normal action error/continuation aggregation.
+`notification.bel()` emits through the same first-class BEL backend as a configured `bel` action. `notification.osc(title, body)` reuses the shared OSC backend (Windows Terminal toast, WSL PowerShell resolution, Kitty/iTerm/OSC777/tmux). Both participate in normal action error/continuation aggregation.
 
 Because `js:` runs in the Pi process, it has the current user's full permissions and can call powerful Pi APIs. Global and trusted-project configuration are executable code; review them as carefully as an extension.
 
@@ -216,7 +221,7 @@ Only a non-empty `hooks["agent-notify"].actions` list containing at least one va
 Notification hook published
 ```
 
-Successful synchronous construction and bus emit are enough for tool success. Synchronous emit failures become tool errors. Asynchronous consumer/action failures never feed back into the tool result; the generic router executes configured actions independently.
+Successful synchronous construction and bus emit are enough for tool success. Synchronous emit failures become tool errors. Asynchronous consumer/action failures never feed back into the tool result; the generic router executes configured actions independently. See the [readable `agent_notify` configuration example](./example/agent-notify.md).
 
 ## Terminal support
 
@@ -239,6 +244,14 @@ set -g allow-passthrough on
 ```
 
 Zellij and GNU Screen do not provide equivalent passthrough support here.
+
+## Examples
+
+- [`agent_notify` with BEL, templates, and optional ntfy](./example/agent-notify.md)
+- [`ask_user_question` lifecycle notifications](./example/rpiv-ask-user-question.md)
+- [`pi-continue-watchdog` semantic-hook notifications](./example/pi-continue-watchdog.md)
+
+The examples prefer built-in `bel`, templated `osc:`, and direct `shell:` actions. Use `js:` only when behavior is genuinely conditional or cannot be expressed by those declarative actions.
 
 ## Development
 

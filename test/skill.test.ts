@@ -34,6 +34,7 @@ test("adapt-pi-notify skill is packaged with the accepted neutral-hook contract"
 
   assert.match(skill, /notification\.values/);
   assert.match(skill, /notification\.osc\("Pi", notification\.values\.REASON\)/);
+  assert.match(skill, /notification\.bel\(\)/);
   assert.doesNotMatch(skill, /Planned API/);
   assert.doesNotMatch(skill, /not available in the current pre-neutral-hooks pi-notify runtime/);
 
@@ -44,4 +45,5 @@ test("adapt-pi-notify skill is packaged with the accepted neutral-hook contract"
   assert.match(skill, /update Git packages through Pi CLI/);
 
   assert.equal(manifest.files?.includes("skills"), true);
+  assert.equal(manifest.files?.includes("example"), true);
 });
