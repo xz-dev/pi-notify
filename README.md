@@ -85,6 +85,24 @@ pi -e /path/to/pi-notify/index.ts
 
 ## Configuration
 
+### Prefer AI-assisted setup
+
+The nested `events` / `hooks` shape, action syntax, templates, delay semantics, and Pi trust/lifecycle boundaries are easy to misconfigure by hand. **Prefer asking an AI coding agent to write or review your `pi-notify.json`.**
+
+When you do, point the AI at:
+
+1. **This repository** (README, `example/`, and the packaged `adapt-pi-notify-skill`) for pi-notify’s config contract and action kinds.
+2. **The Pi source** at [https://github.com/earendil-works/pi](https://github.com/earendil-works/pi) for authoritative lifecycle events (`agent_settled`, `tool_execution_start`, session trust, `pi.events`, extension APIs).
+
+Suggested prompt fragment:
+
+```text
+Configure pi-notify for my use case. Read the pi-notify README/examples/skill,
+and verify Pi lifecycle/event/API assumptions against the earendil-works/pi source
+(https://github.com/earendil-works/pi) rather than guessing from memory.
+Write a complete pi-notify.json (global and/or trusted project) and explain each binding.
+```
+
 Nested JSON only. Old flat top-level event keys and `pi_notify:agent_notify` are ignored with one bounded migration diagnostic.
 
 ```json
