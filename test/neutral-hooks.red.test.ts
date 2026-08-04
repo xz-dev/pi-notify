@@ -554,8 +554,10 @@ test("notification.bel backend failure aggregates once, remains catchable, and l
 
   assert.deepEqual(commands, ["after-bel-fail"]);
   assert.match(String((globalThis as { __belCaught?: string }).__belCaught), /bel-backend-down/);
-  const aggregate = warnings.filter((entry) => /reported 1 failure\(s\): bel: bel-backend-down/.test(entry));
-  assert.equal(aggregate.length, 1);
+  const diagnostic = warnings.filter((entry) =>
+    /pi-notify · hook:user-ready · bel action failed: bel-backend-down/.test(entry),
+  );
+  assert.equal(diagnostic.length, 1);
   assert.equal(warnings.filter((entry) => entry.includes("bel-backend-down")).length, 1);
   delete (globalThis as { __belCaught?: string }).__belCaught;
 });
@@ -595,8 +597,10 @@ test("notification.osc backend failure aggregates once, still throws into js, la
 
   assert.deepEqual(commands, ["after-osc-fail"]);
   assert.match(String((globalThis as { __oscCaught?: string }).__oscCaught), /osc-backend-down/);
-  const aggregate = warnings.filter((entry) => /reported 1 failure\(s\): osc: osc-backend-down/.test(entry));
-  assert.equal(aggregate.length, 1);
+  const diagnostic = warnings.filter((entry) =>
+    /pi-notify · hook:user-ready · osc action failed: osc-backend-down/.test(entry),
+  );
+  assert.equal(diagnostic.length, 1);
   assert.equal(warnings.filter((entry) => entry.includes("osc-backend-down")).length, 1);
   delete (globalThis as { __oscCaught?: string }).__oscCaught;
 });

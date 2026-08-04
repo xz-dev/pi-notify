@@ -19,6 +19,7 @@ import {
   type SemanticHookV1,
 } from "./src/semantic-hook.js";
 import type {
+  ActionExecutionObserver,
   LifecycleEventKey,
   NotificationAction,
   NotificationBinding,
@@ -50,13 +51,19 @@ export interface Scheduler {
 export interface NotificationRuntime {
   agentDir: string;
   launchBel?: () => void;
-  launchOsc: (title: string, body: string) => void;
-  launchCommand: (command: string, cwd: string, environment: NotificationEnvironment) => void;
+  launchOsc: (title: string, body: string, observer?: ActionExecutionObserver) => void;
+  launchCommand: (
+    command: string,
+    cwd: string,
+    environment: NotificationEnvironment,
+    observer?: ActionExecutionObserver,
+  ) => void;
   launchShell: (
     executable: string,
     args: readonly string[],
     cwd: string,
     environment: NotificationEnvironment,
+    observer?: ActionExecutionObserver,
   ) => void;
   resolvePowerShell?: () => string | undefined;
   platform?: NodeJS.Platform;
@@ -239,6 +246,19 @@ export default function registerExtension(pi: ExtensionAPI, runtime: Notificatio
           throwOnFailure: false,
           defaultOsc,
           isCurrent: () => isCurrent(generation),
+          onActionFailure: (label, error) => {
+            if (!isCurrent(generation)) return;
+            const message = error instanceof Error ? error.message : String(error);
+            const diagnostic = `pi-notify · ${key.startsWith("hook:") ? key : `event:${key}`} · ${label} action failed: ${message}`;
+            runtime.warn(diagnostic);
+            if (!liveCtx.hasUI) return;
+            try {
+              liveCtx.ui.notify(diagnostic, "error");
+            } catch (notifyError) {
+              const notifyMessage = notifyError instanceof Error ? notifyError.message : String(notifyError);
+              runtime.warn(`Cannot show notification action failure: ${notifyMessage}`);
+            }
+          },
         });
       } catch (error) {
         if (!isCurrent(generation)) return;

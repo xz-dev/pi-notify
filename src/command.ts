@@ -1,9 +1,9 @@
 import { spawn as nodeSpawn } from "node:child_process";
 
-import type { NotificationEnvironment } from "./types.js";
+import type { ActionExecutionObserver, NotificationEnvironment } from "./types.js";
 
 interface ChildProcessLike {
-  once(event: "error", listener: (error: Error) => void): unknown;
+  once(event: string, listener: (...args: any[]) => void): unknown;
   unref(): void;
 }
 
@@ -62,11 +62,25 @@ function buildEnvironment(
   return env;
 }
 
+function observeChild(child: ChildProcessLike, noun: string, observer: ActionExecutionObserver): void {
+  child.once("error", (error) => observer.reportFailure(error));
+  child.once("exit", (code, signal) => {
+    if (code === 0 && signal === null) return;
+    const outcome = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
+    observer.reportFailure(new Error(`Notification ${noun} exited with ${outcome}`));
+  });
+}
+
 export function createCommandLauncher(options: CommandLauncherOptions) {
   const inheritedEnvironment = options.inheritedEnvironment ?? process.env;
   const spawn = options.spawn ?? ((command, spawnOptions) => nodeSpawn(command, spawnOptions));
 
-  return (command: string, cwd: string, notificationEnvironment: NotificationEnvironment): void => {
+  return (
+    command: string,
+    cwd: string,
+    notificationEnvironment: NotificationEnvironment,
+    observer?: ActionExecutionObserver,
+  ): void => {
     const env = buildEnvironment(inheritedEnvironment, notificationEnvironment);
 
     try {
@@ -78,11 +92,12 @@ export function createCommandLauncher(options: CommandLauncherOptions) {
         stdio: "ignore",
         windowsHide: true,
       });
-      child.once("error", (error) => options.warn(`Cannot launch notification command: ${error.message}`));
+      if (observer) observeChild(child, "command", observer);
+      else child.once("error", (error) => options.warn(`Cannot launch notification command: ${error.message}`));
       child.unref();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      options.warn(`Cannot launch notification command: ${message}`);
+      if (!observer) options.warn(`Cannot launch notification command: ${message}`);
       throw new CommandLaunchError(`Cannot launch notification command: ${message}`, { cause: error });
     }
   };
@@ -100,6 +115,7 @@ export function createShellLauncher(options: ShellLauncherOptions) {
     args: readonly string[],
     cwd: string,
     notificationEnvironment: NotificationEnvironment,
+    observer?: ActionExecutionObserver,
   ): void => {
     const env = buildEnvironment(inheritedEnvironment, notificationEnvironment);
 
@@ -112,11 +128,12 @@ export function createShellLauncher(options: ShellLauncherOptions) {
         stdio: "ignore",
         windowsHide: true,
       });
-      child.once("error", (error) => options.warn(`Cannot launch notification shell: ${error.message}`));
+      if (observer) observeChild(child, "shell", observer);
+      else child.once("error", (error) => options.warn(`Cannot launch notification shell: ${error.message}`));
       child.unref();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      options.warn(`Cannot launch notification shell: ${message}`);
+      if (!observer) options.warn(`Cannot launch notification shell: ${message}`);
       throw new CommandLaunchError(`Cannot launch notification shell: ${message}`, { cause: error });
     }
   };

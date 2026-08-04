@@ -5,6 +5,7 @@ import { isShellTupleAction, parseShellTuple } from "./config.js";
 import { createNotificationEnvironment, createTemplateValues, renderTemplate } from "./context.js";
 import { isBarePowerShellExe, resolvePowerShell } from "./powershell.js";
 import type {
+  ActionExecutionObserver,
   JsNotificationContext,
   NotificationAction,
   NotificationContext,
@@ -14,13 +15,19 @@ import type {
 
 export interface ActionRuntime {
   launchBel: () => void;
-  launchOsc: (title: string, body: string) => void;
-  launchCommand: (command: string, cwd: string, environment: NotificationEnvironment) => void;
+  launchOsc: (title: string, body: string, observer?: ActionExecutionObserver) => void;
+  launchCommand: (
+    command: string,
+    cwd: string,
+    environment: NotificationEnvironment,
+    observer?: ActionExecutionObserver,
+  ) => void;
   launchShell: (
     executable: string,
     args: readonly string[],
     cwd: string,
     environment: NotificationEnvironment,
+    observer?: ActionExecutionObserver,
   ) => void;
   resolvePowerShell?: () => string | undefined;
   platform?: NodeJS.Platform;
@@ -49,6 +56,8 @@ export interface RunActionsOptions {
   defaultOsc?: { title: string; body: string };
   /** Optional generation gate checked before side effects (including notification.osc). */
   isCurrent?: () => boolean;
+  /** Reports each configured action failure to the originating consumer context. */
+  onActionFailure?: (label: string, error: unknown) => void;
 }
 
 function defaultRunJs(code: string, scope: JsActionScope): Promise<void> {
@@ -106,18 +115,24 @@ function buildJsNotification(
   notification: NotificationContext,
   runtime: ActionRuntime,
   failures: string[],
+  createObserver: (label: string) => ActionExecutionObserver,
   isCurrent?: () => boolean,
 ): JsNotificationContext {
   const values = Object.freeze({ ...(notification.values ?? {}) });
-  const launch = (label: "bel" | "osc", operation: () => void): void => {
+  const launch = (
+    label: "bel" | "osc",
+    operation: (observer: ActionExecutionObserver) => void,
+  ): void => {
     if (isCurrent && !isCurrent()) return;
+    const observer = createObserver(label);
     try {
-      operation();
+      operation(observer);
     } catch (error) {
       // Record once for aggregate reporting; still rethrow so surrounding js can observe.
       const message = error instanceof Error ? error.message : String(error);
       const failure = `${label}: ${message}`;
       if (!failures.includes(failure)) failures.push(failure);
+      observer.reportFailure(error);
       throw error instanceof Error ? error : new Error(message);
     }
   };
@@ -126,10 +141,10 @@ function buildJsNotification(
     ...notification,
     values,
     bel(): void {
-      launch("bel", runtime.launchBel);
+      launch("bel", () => runtime.launchBel());
     },
     osc(title: string, body: string): void {
-      launch("osc", () => runtime.launchOsc(title, body));
+      launch("osc", (observer) => runtime.launchOsc(title, body, observer));
     },
   };
 }
@@ -142,15 +157,32 @@ export async function runActions(options: RunActionsOptions): Promise<void> {
   const environment = createNotificationEnvironment(notification);
   const failures: string[] = [];
   const runJs = runtime.runJs ?? defaultRunJs;
-  const jsNotification = buildJsNotification(notification, runtime, failures, isCurrent);
+  const reportFailure = (label: string, error: unknown): void => {
+    if (isCurrent && !isCurrent()) return;
+    options.onActionFailure?.(label, error);
+  };
+  const createObserver = (label: string): ActionExecutionObserver => {
+    let reported = false;
+    return {
+      isCurrent: () => !isCurrent || isCurrent(),
+      reportFailure(error): void {
+        if (reported || (isCurrent && !isCurrent())) return;
+        reported = true;
+        reportFailure(label, error);
+      },
+    };
+  };
+  const jsNotification = buildJsNotification(notification, runtime, failures, createObserver, isCurrent);
 
   for (const action of actions) {
     if (isCurrent && !isCurrent()) return;
+    const label = actionLabel(action);
+    const observer = createObserver(label);
     try {
       if (isShellTupleAction(action)) {
         const { interpreter, args } = parseShellTuple(action);
         const resolved = resolveShellInterpreter(interpreter, runtime);
-        runtime.launchShell(resolved, args, notification.cwd, environment);
+        runtime.launchShell(resolved, args, notification.cwd, environment, observer);
         continue;
       }
 
@@ -161,12 +193,12 @@ export async function runActions(options: RunActionsOptions): Promise<void> {
 
       if (action === "osc" || action.startsWith("osc:")) {
         const { title, body } = parseOscAction(action, values, options.key, options.defaultOsc);
-        runtime.launchOsc(title, body);
+        runtime.launchOsc(title, body, observer);
         continue;
       }
 
       if (action.startsWith("cmd:")) {
-        runtime.launchCommand(action.slice(4), notification.cwd, environment);
+        runtime.launchCommand(action.slice(4), notification.cwd, environment, observer);
         continue;
       }
 
@@ -185,13 +217,13 @@ export async function runActions(options: RunActionsOptions): Promise<void> {
       if (isCurrent && !isCurrent()) return;
 
       const message = error instanceof Error ? error.message : String(error);
-      const label = actionLabel(action);
       const failure = `${label}: ${message}`;
       // notification.bel/osc already recorded their own failure; do not also count/report as js failure.
       const alreadyRecordedByHelper =
         label === "js" && (failures.includes(`bel: ${message}`) || failures.includes(`osc: ${message}`));
       if (!alreadyRecordedByHelper && !failures.includes(failure)) failures.push(failure);
-      if (!throwOnFailure && !alreadyRecordedByHelper) {
+      if (!alreadyRecordedByHelper) observer.reportFailure(error);
+      if (!throwOnFailure && !options.onActionFailure && !alreadyRecordedByHelper) {
         // CommandLaunchError already warned at the launcher. Terminal actions report through the aggregate below.
         if (!(error instanceof CommandLaunchError) && label !== "bel" && label !== "osc") {
           runtime.warn(`Notification action failed (${label}): ${message}`);
@@ -206,7 +238,7 @@ export async function runActions(options: RunActionsOptions): Promise<void> {
     throw new Error(`pi-notify action failures: ${failures.join("; ")}`);
   }
 
-  if (!throwOnFailure && failures.length > 0) {
+  if (!throwOnFailure && !options.onActionFailure && failures.length > 0) {
     runtime.warn(`Notification actions reported ${failures.length} failure(s): ${failures.join("; ")}`);
   }
 }

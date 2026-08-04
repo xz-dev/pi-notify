@@ -1,16 +1,17 @@
 import { spawn } from "node:child_process";
 
 import { resolvePowerShell, type PowerShellResolverOptions } from "./powershell.js";
+import type { ActionExecutionObserver } from "./types.js";
 
 interface ChildProcessLike {
-  once(event: "error", listener: (error: Error) => void): unknown;
+  once(event: string, listener: (...args: any[]) => void): unknown;
   unref(): void;
 }
 
 interface OscLauncherOptions {
   environment?: NodeJS.ProcessEnv;
   write?: (value: string) => void;
-  spawnWindowsToast?: (title: string, body: string) => void;
+  spawnWindowsToast?: (title: string, body: string, observer?: ActionExecutionObserver) => void;
   resolvePowerShell?: () => string | undefined;
   spawn?: (
     command: string,
@@ -95,7 +96,11 @@ export function createOscLauncher(options: OscLauncherOptions) {
     options.spawn ??
     ((command, args, spawnOptions) => spawn(command, args, spawnOptions) as ChildProcessLike);
 
-  const defaultSpawnWindowsToast = (title: string, body: string): void => {
+  const defaultSpawnWindowsToast = (
+    title: string,
+    body: string,
+    observer?: ActionExecutionObserver,
+  ): void => {
     const powershell = resolvePs();
     if (!powershell) {
       options.warn("Cannot launch Windows notification: powershell unavailable; falling back to terminal OSC");
@@ -115,8 +120,14 @@ export function createOscLauncher(options: OscLauncherOptions) {
     const runFallbackIfRequested = () => {
       if (fellBack || fallbackReason === undefined) return;
       fellBack = true;
+      if (observer && !observer.isCurrent()) return;
       options.warn(`Cannot launch Windows notification: ${fallbackReason}; falling back to terminal OSC`);
-      writeOscSequences(title, body, environment, write);
+      try {
+        writeOscSequences(title, body, environment, write);
+      } catch (error) {
+        observer?.reportFailure(error);
+        if (!observer) throw error;
+      }
     };
     const fallbackOnce = (reason: string) => {
       requestFallback(reason);
@@ -130,6 +141,11 @@ export function createOscLauncher(options: OscLauncherOptions) {
         windowsHide: true,
       });
       child.once("error", (error) => fallbackOnce(error.message));
+      child.once("exit", (code, signal) => {
+        if (code === 0 && signal === null) return;
+        const outcome = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
+        fallbackOnce(`PowerShell exited with ${outcome}`);
+      });
       try {
         child.unref();
       } catch (error) {
@@ -148,12 +164,12 @@ export function createOscLauncher(options: OscLauncherOptions) {
 
   // Synchronous OSC write/spawn failures must surface to runActions (agent_notify aggregates them).
   // Lifecycle paths catch via runActions throwOnFailure=false.
-  return (rawTitle: string, rawBody: string): void => {
+  return (rawTitle: string, rawBody: string, observer?: ActionExecutionObserver): void => {
     const title = sanitizeText(rawTitle);
     const body = sanitizeText(rawBody);
 
     if (environment.WT_SESSION) {
-      spawnWindowsToast(title, body);
+      spawnWindowsToast(title, body, observer);
       return;
     }
 

@@ -45,6 +45,12 @@ export type TemplateValues = Record<string, string | undefined>;
 
 export type NotificationEnvironment = Record<string, string | undefined>;
 
+/** Reports failures that happen after a fire-and-forget action has launched. */
+export interface ActionExecutionObserver {
+  isCurrent: () => boolean;
+  reportFailure: (error: unknown) => void;
+}
+
 export interface NotificationContext {
   event: string;
   hook?: string;
