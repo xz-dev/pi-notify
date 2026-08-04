@@ -1,37 +1,83 @@
 # pi-notify
 
-Configurable notifications for [Pi](https://github.com/badlogic/pi-mono). Notify through terminal-native protocols, launch commands through the platform shell or an explicit interpreter, run trusted JavaScript against Pi's public extension APIs, consume neutral semantic hooks from other extensions, and optionally let the AI publish a titled notification hook.
+Route Pi lifecycle events and neutral semantic hooks to **notification actions**.
+
+pi-notify is not limited to one notification form. Built-in actions are **BEL** and **OSC** (including Windows Terminal toast). Custom actions can launch a shell command, spawn an explicit interpreter, or run trusted JavaScript—so ntfy, scripts, and conditional logic are configuration, not hard-coded backends.
 
 Inspired by [ferologics/pi-notify](https://github.com/ferologics/pi-notify).
 
+## Mental model
+
+```text
+Trigger  →  Binding { delayMs, actions }  →  Action pipeline
+```
+
+| Layer | What it is |
+| --- | --- |
+| **Triggers** | Two fixed Pi lifecycle events, plus any semantic hook name on `pi:semantic-hook:v1` |
+| **Binding** | Per-event / per-hook `{ "delayMs"?: number, "actions": [...] }` |
+| **Actions** | What runs: built-in BEL/OSC, or custom `cmd:` / `shell:` / `js:` |
+
+Producers own semantic meaning and timing. pi-notify only routes and executes. It has no hook-name whitelist and does not import or identify other extensions.
+
+## Kinds
+
+### Triggers
+
+| Kind | Config | Open? | Keys |
+| --- | --- | --- | --- |
+| Lifecycle events | `events.*` | Closed set | `agent_settled`, `tool_execution_start:ask_user_question` |
+| Semantic hooks | `hooks.<name>` | Open | Any lowercase kebab-case name |
+
+Optional producer (not a third trigger kind):
+
+| Name | When | Behavior |
+| --- | --- | --- |
+| `agent_notify({ title, content })` | Only if `hooks["agent-notify"]` has at least one valid action | Publishes the `agent-notify` hook; does not wait for delivery |
+
+### Actions
+
+| Action | Role | Execution |
+| --- | --- | --- |
+| `bel` | Built-in terminal BEL (`U+0007`) | Fire-and-forget; valid for lifecycle events and hooks |
+| `osc` | Built-in lifecycle default OSC / Windows toast | Fire-and-forget; **lifecycle only** |
+| `osc:<title>&#124;<body>` | Built-in OSC / Windows toast with templates | Fire-and-forget; required form for hooks |
+| `cmd:<command>` | Platform default shell | Fire-and-forget |
+| `["shell:<interpreter>", "arg1", ...]` | Direct argv spawn (`shell: false`) | Fire-and-forget |
+| `js:<code>` | Trusted in-process JavaScript | Awaited |
+
+Prefer declarative `bel`, templated `osc:`, and `shell:` tuples. Use `js:` only for conditional behavior those cannot express.
+
+### Shared binding rules
+
+- `delayMs` defaults to `0` (nonnegative safe integer within the Node timer maximum).
+- Flow: retain causal data → wait `delayMs` → collect live cwd/session/env → execute.
+- No debounce, dedup, or latest-event replacement. Reload / `session_shutdown` cancels pending work.
+- Global config + trusted project config; matching bindings replace as whole units.
+- Explicit `"actions": []` disables that binding.
+
 ## Features
 
-- Uses Pi's public `agent_settled` event, so an idle notification is sent only after automatic retries, compaction, and queued continuations have settled.
-- Observes `ask_user_question` through `tool_execution_start` without blocking or modifying the tool call.
-- Consumes neutral semantic hooks on the public `pi:semantic-hook:v1` bus without a hook-name whitelist or producer identity.
-- Loads nested global configuration plus optional trusted-project whole-unit overrides.
-- Supports per-binding `delayMs` with retain-causal → delay → collect-live → execute semantics (no debounce/dedup).
-- Supports first-class terminal BEL plus Windows Terminal toast, Kitty OSC 99, iTerm2 OSC 9, and OSC 777, including tmux passthrough.
-- Preserves concise `cmd:` actions through the platform's default shell and supports `shell:` actions with an explicit interpreter.
-- Runs trusted `js:` actions in-process with `pi`, `ctx`, causal `event`, and `notification` (including frozen `values`, `notification.bel()`, and `notification.osc()`).
-- Optionally exposes `agent_notify({ title, content })` when `hooks["agent-notify"]` has at least one valid action; the tool is a pure producer of the `agent-notify` hook.
-- Keeps terminal and command actions fire-and-forget while awaiting JavaScript actions. One action failure does not prevent later actions from being attempted.
+- Routes Pi `agent_settled` and filtered `ask_user_question` starts, plus any semantic hook.
+- First-class **BEL** and **OSC** notification backends (Kitty / iTerm2 / OSC 777 / Windows toast / tmux passthrough).
+- Open custom actions via platform shell, direct interpreter, or trusted JavaScript.
+- Neutral `pi:semantic-hook:v1` consumer with no producer identity and no name whitelist.
+- Optional AI tool that only publishes an `agent-notify` hook.
+- Non-blocking consumers: action failures never throw into Pi's bus or lifecycle.
 
 ## Requirements
 
-- Pi 0.83.0 or newer with the public `agent_settled` and `tool_execution_start` events and `pi.events` bus.
+- Pi 0.83.0 or newer with public `agent_settled`, `tool_execution_start`, and `pi.events`.
 - Node.js 22.19.0 or newer.
-- The `tool_execution_start:ask_user_question` key expects the model-visible tool name `ask_user_question`, used by [`@juicesharp/rpiv-ask-user-question`](https://www.npmjs.com/package/@juicesharp/rpiv-ask-user-question).
+- `tool_execution_start:ask_user_question` expects the model-visible tool name `ask_user_question` (as used by [`@juicesharp/rpiv-ask-user-question`](https://www.npmjs.com/package/@juicesharp/rpiv-ask-user-question)).
 
 ## Install
-
-Install directly from GitHub:
 
 ```bash
 pi install git:github.com/xz-dev/pi-notify
 ```
 
-Restart Pi after installation. To try a checkout without installing it:
+Restart Pi after installation. To try a checkout without installing:
 
 ```bash
 pi -e /path/to/pi-notify/index.ts
@@ -39,9 +85,7 @@ pi -e /path/to/pi-notify/index.ts
 
 ## Configuration
 
-Configuration is a nested JSON object with `events` (Pi lifecycle) and `hooks` (semantic hooks). Each binding is `{ "delayMs"?: number, "actions": [...] }`. `delayMs` defaults to `0` and must be a nonnegative safe integer within the Node timer maximum.
-
-This is a breaking shape: old flat top-level event keys and `pi_notify:agent_notify` are ignored with one bounded migration diagnostic.
+Nested JSON only. Old flat top-level event keys and `pi_notify:agent_notify` are ignored with one bounded migration diagnostic.
 
 ```json
 {
@@ -87,16 +131,16 @@ This is a breaking shape: old flat top-level event keys and `pi_notify:agent_not
 
 ### Configuration files
 
-1. Global: `$PI_CODING_AGENT_DIR/pi-notify.json`
-   - Default: `~/.pi/agent/pi-notify.json`
-2. Project: `<current Pi cwd>/.pi/pi-notify.json`
-   - Read only when Pi reports the project as trusted.
-   - A project binding replaces the matching global binding as one complete `{ delayMs, actions }` unit.
-   - Nonmatching global event and hook bindings remain available.
-   - An invalid higher-precedence binding is ignored and does not erase a valid lower-precedence binding.
-   - An explicit empty `actions` array disables that binding.
+1. Global: `$PI_CODING_AGENT_DIR/pi-notify.json` (default `~/.pi/agent/pi-notify.json`)
+2. Project: `<current Pi cwd>/.pi/pi-notify.json` (only when Pi reports the project trusted)
 
-A missing file is an empty configuration. Invalid JSON, unsupported lifecycle event names, invalid hook names, invalid actions, and invalid `delayMs` produce non-blocking warnings and are ignored.
+Rules:
+
+- A project binding replaces the matching global binding as one complete `{ delayMs, actions }` unit.
+- Non-matching global bindings remain.
+- An invalid higher-precedence binding is ignored and does not erase a valid lower-precedence binding.
+- Missing files are empty configuration.
+- Invalid JSON, unsupported lifecycle keys, invalid hook names, invalid actions, and invalid `delayMs` produce non-blocking warnings and are ignored.
 
 ### Lifecycle event keys
 
@@ -128,11 +172,11 @@ Envelope:
 Rules:
 
 - `name` is lowercase kebab-case.
-- optional `values` keys are uppercase underscore identifiers with string values.
-- plain data only; no `ctx`, functions, callbacks, or plugin identity.
-- best-effort current-listener delivery only: no buffer, replay, ack, retry, or backpressure.
+- Optional `values` keys are uppercase underscore identifiers with string values.
+- Plain data only: no `ctx`, functions, callbacks, or plugin identity.
+- Best-effort current-listener delivery only: no buffer, replay, ack, retry, or backpressure.
 - pi-notify routes `hooks[name]` with no semantic-name whitelist.
-- unconfigured names are silent; malformed envelopes produce a bounded warning.
+- Unconfigured names are silent; malformed envelopes produce a bounded warning.
 
 Consumer-owned fields for hooks:
 
@@ -143,32 +187,32 @@ Consumer-owned fields for hooks:
 
 Validated producer values become additional templates and `PI_NOTIFY_*` entries unless they collide with reserved consumer keys: `EVENT`, `HOOK`, `CWD`, `HOSTNAME`, `SESSION_ID`, `SESSION_FILE`, `TOOL`, `TOOL_CALL_ID`.
 
-Bare `osc` is valid only for lifecycle events (built-in default copy). Hook bindings reject bare `osc` with a config diagnostic; use `osc:<title>|<body>` or `notification.osc` in `js:`. Bare `bel` is valid for both lifecycle events and hooks because it has no text payload or event-specific default.
+Bare `osc` is valid only for lifecycle events (built-in default copy). Hook bindings reject bare `osc`; use `osc:<title>|<body>` or `notification.osc` in `js:`. Bare `bel` is valid for both because it has no text payload.
 
 ### Binding delay
 
 Every received event or hook schedules its own independent timer:
 
-1. validate and copy immutable causal data (Pi event payload or semantic name/values) plus the chosen binding;
-2. wait `delayMs`;
-3. verify the consumer generation is still current;
-4. collect live cwd/session fields, a currently valid public `ExtensionContext`, and the inherited process environment;
-5. construct `PI_NOTIFY_*`, render templates, and execute actions.
+1. Validate and copy immutable causal data plus the chosen binding.
+2. Wait `delayMs`.
+3. Verify the consumer generation is still current.
+4. Collect live cwd/session fields, a currently valid public `ExtensionContext`, and the inherited process environment.
+5. Construct `PI_NOTIFY_*`, render templates, and execute actions.
 
-There is no debounce, replacement, coalescing, or revalidation against new activity. Reload/`session_shutdown` unsubscribes, cancels pending timers, and advances generation so late work cannot cause side effects.
+There is no debounce, replacement, coalescing, or revalidation against new activity. Reload / `session_shutdown` unsubscribes, cancels pending timers, and advances generation so late work cannot cause side effects.
 
-### Actions
+### Action details
 
 | Action | Behavior |
 | --- | --- |
-| `bel` | Emit one standard terminal BEL (`U+0007`). Valid for lifecycle events and semantic hooks; the terminal decides whether it is audible, visual, or a taskbar attention flash. |
-| `osc` | Lifecycle only: send the event's built-in terminal notification. |
-| `osc:<title>|<body>` | Send a terminal notification with template-expanded title and body. Both sides of `|` must be non-empty. |
-| `cmd:<shell command>` | Launch the command through the platform's default shell with the current Pi cwd and notification environment. The command must be non-empty. |
+| `bel` | Emit one standard terminal BEL. The terminal decides whether it is audible, visual, or a taskbar flash. |
+| `osc` | Lifecycle only: send the event's built-in terminal notification (`agent_settled` → “Ready for input”; ask-user → “Question needs your input”). |
+| `osc:<title>&#124;<body>` | Send a terminal notification with template-expanded title and body. Both sides of the `&#124;` separator must be non-empty. |
+| `cmd:<shell command>` | Launch through the platform default shell with the current Pi cwd and notification environment. |
 | `["shell:<interpreter>", "arg1", ...]` | Resolve one explicit interpreter and launch it directly with the remaining strings as exact arguments. At least one argument is required. |
-| `js:<code>` | Await trusted JavaScript in the plugin process with `pi`, `ctx`, causal `event`, and `notification` in scope. The code must be non-empty. |
+| `js:<code>` | Await trusted JavaScript in the plugin process with `pi`, `ctx`, causal `event`, and `notification` in scope. |
 
-Actions are started in array order and every action is attempted even if an earlier one fails. `bel`, `osc`, `cmd:`, and `shell:` are fire-and-forget; command completion order and exit status are intentionally not observed. `js:` is awaited. Lifecycle and hook consumer failures produce non-blocking warnings and never throw into Pi's bus or lifecycle.
+Actions start in array order; every action is attempted even if an earlier one fails. `bel`, `osc`, `cmd:`, and `shell:` are fire-and-forget (completion and exit status are not observed). `js:` is awaited. Consumer failures produce non-blocking warnings and never throw into Pi's bus or lifecycle.
 
 ## Templates and command environment
 
@@ -188,9 +232,9 @@ Actions are started in array order and every action is attempted even if an earl
 
 If a template value is unavailable, its placeholder is preserved literally. The extension removes all inherited `PI_NOTIFY_*` values before adding the current context. Lifecycle tool arguments—including question text—are never copied into the command environment. A `js:` action intentionally receives the complete retained causal event, including tool arguments when present.
 
-`cmd:` uses the platform shell (`/bin/sh` on Unix-like systems and `ComSpec`/`cmd.exe` on Windows).
+`cmd:` uses the platform shell (`/bin/sh` on Unix-like systems; `ComSpec` / `cmd.exe` on Windows).
 
-A `shell:` tuple bypasses the host shell and calls the interpreter directly with `shell: false`. pi-notify does not add `-c`, `/c`, `-Command`, or any other argument. Only the bare interpreter name `powershell.exe` (case-insensitive) is resolved automatically on WSL.
+A `shell:` tuple bypasses the host shell and calls the interpreter with `shell: false`. pi-notify does not add `-c`, `/c`, `-Command`, or any other argument. Only the bare interpreter name `powershell.exe` (case-insensitive) is resolved automatically on WSL.
 
 ### JavaScript notification context
 
@@ -203,7 +247,7 @@ A `shell:` tuple bypasses the host shell and calls the interpreter directly with
 
 `notification.values` is `{}` for lifecycle events and the frozen validated producer values for hooks (system keys stripped).
 
-`notification.bel()` emits through the same first-class BEL backend as a configured `bel` action. `notification.osc(title, body)` reuses the shared OSC backend (Windows Terminal toast, WSL PowerShell resolution, Kitty/iTerm/OSC777/tmux). Both participate in normal action error/continuation aggregation.
+`notification.bel()` uses the same first-class BEL backend as a configured `bel` action. `notification.osc(title, body)` reuses the shared OSC backend (Windows Terminal toast, WSL PowerShell resolution, Kitty/iTerm/OSC777/tmux). Both participate in normal action error/continuation aggregation.
 
 Because `js:` runs in the Pi process, it has the current user's full permissions and can call powerful Pi APIs. Global and trusted-project configuration are executable code; review them as carefully as an extension.
 
@@ -221,21 +265,21 @@ Only a non-empty `hooks["agent-notify"].actions` list containing at least one va
 Notification hook published
 ```
 
-Successful synchronous construction and bus emit are enough for tool success. Synchronous emit failures become tool errors. Asynchronous consumer/action failures never feed back into the tool result; the generic router executes configured actions independently. See the [readable `agent_notify` configuration example](./example/agent-notify.md).
+Successful synchronous construction and bus emit are enough for tool success. Synchronous emit failures become tool errors. Asynchronous consumer/action failures never feed back into the tool result. See the [readable `agent_notify` configuration example](./example/agent-notify.md).
 
-## Terminal support
+## Terminal support (BEL / OSC)
 
-| Terminal | Support | Protocol |
+| Terminal | BEL | OSC / toast |
 | --- | --- | --- |
-| Ghostty | Yes | OSC 777 |
-| iTerm2 | Yes | OSC 9 |
-| WezTerm | Yes | OSC 777 |
-| rxvt-unicode | Yes | OSC 777 |
-| Kitty | Yes | OSC 99 |
-| tmux | Conditional | Passthrough around the selected OSC protocol |
-| Windows Terminal | Yes | PowerShell toast |
-| Terminal.app | No | OSC 777 fallback is emitted, but Terminal.app does not display it |
-| Alacritty | No | OSC 777 fallback is emitted, but Alacritty does not display it |
+| Ghostty | Terminal-dependent | OSC 777 |
+| iTerm2 | Terminal-dependent | OSC 9 |
+| WezTerm | Terminal-dependent | OSC 777 |
+| rxvt-unicode | Terminal-dependent | OSC 777 |
+| Kitty | Terminal-dependent | OSC 99 |
+| tmux | Passthrough if enabled | Passthrough around the selected OSC protocol |
+| Windows Terminal | Terminal-dependent | PowerShell toast |
+| Terminal.app | Terminal-dependent | OSC 777 fallback is emitted, but Terminal.app does not display it |
+| Alacritty | Terminal-dependent | OSC 777 fallback is emitted, but Alacritty does not display it |
 
 Unknown terminals receive the OSC 777 fallback; whether it is displayed depends on terminal support. Inside tmux, enable passthrough:
 
@@ -251,7 +295,9 @@ Zellij and GNU Screen do not provide equivalent passthrough support here.
 - [`ask_user_question` lifecycle notifications](./example/rpiv-ask-user-question.md)
 - [`pi-continue-watchdog` semantic-hook notifications](./example/pi-continue-watchdog.md)
 
-The examples prefer built-in `bel`, templated `osc:`, and direct `shell:` actions. Use `js:` only when behavior is genuinely conditional or cannot be expressed by those declarative actions.
+Examples prefer built-in `bel`, templated `osc:`, and direct `shell:` actions. Use `js:` only when behavior is genuinely conditional.
+
+To adapt another extension as a neutral producer, see the packaged skill `adapt-pi-notify-skill`.
 
 ## Development
 

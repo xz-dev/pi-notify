@@ -1,7 +1,7 @@
 {
   "name": "pi-notify",
   "version": "0.1.0",
-  "description": "Configurable terminal and command notifications for Pi",
+  "description": "Route Pi lifecycle events and semantic hooks to BEL, OSC, and custom notification actions",
   "type": "module",
   "files": [
     "index.ts",
