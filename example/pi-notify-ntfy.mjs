@@ -74,13 +74,22 @@ if (mode === "question") {
 const body = `${message}\nsession id: ${sessionId}`;
 
 try {
-  const response = await fetch(NTFY_URL, {
+  const endpoint = new URL(NTFY_URL);
+  const topic = decodeURIComponent(endpoint.pathname.slice(1));
+  if (!/^[-_A-Za-z0-9]{1,64}$/.test(topic)) throw new Error("Invalid ntfy topic");
+  endpoint.pathname = "/";
+  endpoint.search = "";
+  endpoint.hash = "";
+
+  const response = await fetch(endpoint, {
     method: "POST",
-    headers: {
-      Title: title,
-      Tags: `${tag},${hostnameTag}`,
-    },
-    body,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      topic,
+      title,
+      message: body,
+      tags: [tag, hostnameTag],
+    }),
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
