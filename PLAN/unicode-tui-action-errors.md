@@ -43,10 +43,10 @@ Given no UI is available, failures still go to stderr and no history entry is cr
 
 ## Implementation slices
 
-- [ ] Slice 1 (`fix/multilingual-ntfy`): add a RED helper acceptance test, encode ntfy request metadata using ntfy's documented Unicode-safe request shape, make it GREEN, review, commit, merge.
+- [x] Slice 1 (`fix/multilingual-ntfy`): add a RED helper acceptance test, encode ntfy request metadata using ntfy's documented Unicode-safe request shape, make it GREEN, review, commit, merge.
 - [ ] Slice 2 (`feat/tui-action-errors`): add RED event/hook TUI examples; add one failure-reporting seam shared by synchronous, awaited, and child-process callback failures; preserve continuation/stale semantics; review, commit, merge.
 - [ ] Verification: full tests, typecheck, exact-index package/install/load smoke, live isolated Pi acceptance, independent final review.
-- [ ] Protected local migration: back up `/home/xz/.pi/agent/pi-notify-ntfy.mjs`, update through the maintained example after source verification, preserve mode/owner/topic bytes, and run a real ntfy delivery probe.
+- [ ] Protected local migration: back up `$HOME/.pi/agent/pi-notify-ntfy.mjs`, update through the maintained example after source verification, preserve mode/owner/topic bytes, use a portable `cmd:` action that lets the host shell expand `$HOME`, and run a real ntfy delivery probe.
 
 ## Source basis
 

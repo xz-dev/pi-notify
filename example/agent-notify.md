@@ -38,7 +38,7 @@ For a remote ntfy notification, copy [`pi-notify-ntfy.mjs`](./pi-notify-ntfy.mjs
 install -m 700 example/pi-notify-ntfy.mjs ~/.pi/agent/pi-notify-ntfy.mjs
 ```
 
-Then append the direct `shell:` action:
+Then append a portable `cmd:` action. The host shell expands `$HOME`, so the same config works under different user home directories:
 
 ```json
 {
@@ -48,16 +48,14 @@ Then append the direct `shell:` action:
       "actions": [
         "bel",
         "osc:🤖 {{TITLE}} · {{HOSTNAME}} · {{CWD}}|{{CONTENT}}\nsession id: {{SESSION_ID}}",
-        [
-          "shell:/usr/bin/node",
-          "/home/YOU/.pi/agent/pi-notify-ntfy.mjs",
-          "agent"
-        ]
+        "cmd:\"$HOME/.pi/agent/pi-notify-ntfy.mjs\" agent"
       ]
     }
   }
 }
 ```
+
+Do not put `$HOME` in a structured `shell:` tuple: tuples use direct argv execution (`shell: false`), so environment-variable text is not expanded.
 
 The tuple is direct argv execution (`shell: false`), not a shell command string. The helper receives notification context through `PI_NOTIFY_*`; it does not need embedded JavaScript in JSON.
 

@@ -3,8 +3,8 @@
 /**
  * Optional ntfy companion for the pi-notify examples.
  *
- * Copy this file outside the package, replace YOUR_PRIVATE_TOPIC, chmod 700,
- * and reference the copied absolute path from a shell: action.
+ * Copy this file to $HOME/.pi/agent, replace YOUR_PRIVATE_TOPIC, chmod 700,
+ * and reference it from a portable cmd: action so the host shell expands $HOME.
  */
 
 const NTFY_URL = "https://ntfy.sh/YOUR_PRIVATE_TOPIC";
