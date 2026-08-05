@@ -54,6 +54,6 @@
   },
   "homepage": "https://github.com/xz-dev/pi-notify#readme",
   "dependencies": {
-    "typebox": "^1.3.9"
+    "typebox": "^1.3.10"
   }
 }
