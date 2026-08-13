@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { readFileSync, rmSync } from "node:fs";
+
 /**
  * Optional ntfy companion for the pi-notify examples.
  *
@@ -8,13 +10,13 @@
  */
 
 const NTFY_URL = "https://ntfy.sh/YOUR_PRIVATE_TOPIC";
-const mode = process.argv[2];
+const env = process.env;
+const mode = process.argv[2] ?? env.PI_NOTIFY_DELIVERY_MODE;
 
 if (NTFY_URL.endsWith("/YOUR_PRIVATE_TOPIC")) {
   process.stderr.write("Replace YOUR_PRIVATE_TOPIC in pi-notify-ntfy.mjs before use\n");
   process.exit(2);
 }
-const env = process.env;
 
 function cleanHeader(value) {
   return String(value ?? "")
@@ -43,7 +45,18 @@ let tag;
 
 if (mode === "question") {
   title = `❓ Pi Question · ${hostname} · ${cwd}`;
-  message = `${cleanHeader(env.PI_NOTIFY_TOOL)} needs your input in ${cwd}`;
+  const bodyFile = env.PI_NOTIFY_QUESTION_BODY_FILE;
+  if (bodyFile) {
+    try {
+      message = cleanBody(readFileSync(bodyFile, "utf8"));
+    } catch {
+      message = "";
+    }
+    rmSync(bodyFile, { force: true });
+  } else {
+    message = cleanBody(env.PI_NOTIFY_QUESTION_BODY);
+  }
+  if (!message) process.exit(0);
   tag = "input-required";
 } else if (mode === "agent") {
   if (!env.PI_NOTIFY_TITLE || !env.PI_NOTIFY_CONTENT) process.exit(0);
