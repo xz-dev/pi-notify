@@ -42,8 +42,8 @@ Optional producer (not a third trigger kind):
 | `bel` | Built-in terminal BEL (`U+0007`) | Fire-and-forget; valid for lifecycle events and hooks |
 | `osc` | Built-in lifecycle default OSC / Windows toast | Fire-and-forget; **lifecycle only** |
 | `osc:<title>&#124;<body>` | Built-in OSC / Windows toast with templates | Fire-and-forget; required form for hooks |
-| `cmd:<command>` | Platform default shell | Fire-and-forget |
-| `["shell:<interpreter>", "arg1", ...]` | Direct argv spawn (`shell: false`) | Fire-and-forget |
+| `cmd:<command>` | Platform default shell | Non-blocking; failed exit reports status and bounded output |
+| `["shell:<interpreter>", "arg1", ...]` | Direct argv spawn (`shell: false`) | Non-blocking; failed exit reports status and bounded output |
 | `js:<code>` | Trusted in-process JavaScript | Awaited |
 
 Prefer declarative `bel`, templated `osc:`, and `shell:` tuples. Use `js:` only for conditional behavior those cannot express.
@@ -230,7 +230,7 @@ There is no debounce, replacement, coalescing, or revalidation against new activ
 | `["shell:<interpreter>", "arg1", ...]` | Resolve one explicit interpreter and launch it directly with the remaining strings as exact arguments. At least one argument is required. |
 | `js:<code>` | Await trusted JavaScript in the plugin process with `pi`, `ctx`, causal `event`, and `notification` in scope. |
 
-Actions start in array order; every action is attempted even if an earlier one fails. `bel`, `osc`, `cmd:`, and `shell:` are fire-and-forget (completion and exit status are not observed). `js:` is awaited. Consumer failures produce non-blocking warnings and never throw into Pi's bus or lifecycle.
+Actions start in array order; every action is attempted even if an earlier one fails. `bel` and `osc` are fire-and-forget. `cmd:` and `shell:` return immediately, then report failed exit status asynchronously with up to 4 KiB each of stdout and stderr; successful output stays silent. `js:` is awaited. Consumer failures produce non-blocking warnings and never throw into Pi's bus or lifecycle. Command output may contain sensitive data, so notification commands should not print secrets.
 
 ## Templates and command environment
 

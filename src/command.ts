@@ -1,8 +1,16 @@
 import { spawn as nodeSpawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 
 import type { ActionExecutionObserver, NotificationEnvironment } from "./types.js";
 
+interface CapturedStreamLike {
+  on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
+  unref?: () => void;
+}
+
 interface ChildProcessLike {
+  stdout?: CapturedStreamLike | null;
+  stderr?: CapturedStreamLike | null;
   once(event: string, listener: (...args: any[]) => void): unknown;
   unref(): void;
 }
@@ -12,7 +20,7 @@ interface CommandSpawnOptions {
   env: NodeJS.ProcessEnv;
   shell: true;
   detached: true;
-  stdio: "ignore";
+  stdio: "ignore" | ["ignore", "pipe", "pipe"];
   windowsHide: true;
 }
 
@@ -21,7 +29,7 @@ interface ShellSpawnOptions {
   env: NodeJS.ProcessEnv;
   shell: false;
   detached: true;
-  stdio: "ignore";
+  stdio: "ignore" | ["ignore", "pipe", "pipe"];
   windowsHide: true;
 }
 
@@ -62,12 +70,50 @@ function buildEnvironment(
   return env;
 }
 
+const MAX_CAPTURED_OUTPUT_BYTES = 4 * 1024;
+
+function captureOutput(stream: CapturedStreamLike | null | undefined): () => string {
+  const chunks: Buffer<ArrayBufferLike>[] = [];
+  let capturedBytes = 0;
+  let truncated = false;
+  stream?.on("data", (chunk) => {
+    if (capturedBytes >= MAX_CAPTURED_OUTPUT_BYTES) {
+      truncated = true;
+      return;
+    }
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    const remaining = MAX_CAPTURED_OUTPUT_BYTES - capturedBytes;
+    const captured = bytes.subarray(0, remaining);
+    chunks.push(captured);
+    capturedBytes += captured.length;
+    if (captured.length < bytes.length) truncated = true;
+  });
+  stream?.unref?.();
+  return () => {
+    const decoder = new StringDecoder("utf8");
+    const bytes = Buffer.concat(chunks);
+    const output = `${decoder.write(bytes)}${truncated ? "" : decoder.end()}`
+      .replace(/\r\n?/g, "\n")
+      .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")
+      .trimEnd();
+    return `${output}${truncated ? `${output ? "\n" : ""}…[truncated]` : ""}`;
+  };
+}
+
 function observeChild(child: ChildProcessLike, noun: string, observer: ActionExecutionObserver): void {
+  const stdout = captureOutput(child.stdout);
+  const stderr = captureOutput(child.stderr);
   child.once("error", (error) => observer.reportFailure(error));
-  child.once("exit", (code, signal) => {
+  child.once("close", (code, signal) => {
     if (code === 0 && signal === null) return;
     const outcome = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
-    observer.reportFailure(new Error(`Notification ${noun} exited with ${outcome}`));
+    const capturedStdout = stdout();
+    const capturedStderr = stderr();
+    const output = [
+      capturedStdout ? `stdout:\n${capturedStdout}` : "stdout: <empty>",
+      capturedStderr ? `stderr:\n${capturedStderr}` : "stderr: <empty>",
+    ].join("\n");
+    observer.reportFailure(new Error(`Notification ${noun} exited with ${outcome}\n${output}`));
   });
 }
 
@@ -89,7 +135,7 @@ export function createCommandLauncher(options: CommandLauncherOptions) {
         env,
         shell: true,
         detached: true,
-        stdio: "ignore",
+        stdio: observer ? ["ignore", "pipe", "pipe"] : "ignore",
         windowsHide: true,
       });
       if (observer) observeChild(child, "command", observer);
@@ -125,7 +171,7 @@ export function createShellLauncher(options: ShellLauncherOptions) {
         env,
         shell: false,
         detached: true,
-        stdio: "ignore",
+        stdio: observer ? ["ignore", "pipe", "pipe"] : "ignore",
         windowsHide: true,
       });
       if (observer) observeChild(child, "shell", observer);

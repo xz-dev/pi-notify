@@ -71,8 +71,25 @@ function makeCtx(cwd: string, toasts: Toast[], notify?: (message: string, type?:
   };
 }
 
-function fakeChild(unrefError?: Error): EventEmitter & { unref: () => void } {
-  const child = new EventEmitter() as EventEmitter & { unref: () => void };
+interface FakeChild extends EventEmitter {
+  stdout: EventEmitter & { unref: () => void; unrefCalls: number };
+  stderr: EventEmitter & { unref: () => void; unrefCalls: number };
+  unref(): void;
+}
+
+function fakeStream(): FakeChild["stdout"] {
+  const stream = new EventEmitter() as FakeChild["stdout"];
+  stream.unrefCalls = 0;
+  stream.unref = () => {
+    stream.unrefCalls += 1;
+  };
+  return stream;
+}
+
+function fakeChild(unrefError?: Error): FakeChild {
+  const child = new EventEmitter() as FakeChild;
+  child.stdout = fakeStream();
+  child.stderr = fakeStream();
   child.unref = () => {
     if (unrefError) throw unrefError;
   };
@@ -152,8 +169,8 @@ test("default process launchers report child errors and nonzero exits once, but 
   const { handlers, tools, pi } = createHarness();
   const toasts: Toast[] = [];
   const warnings: string[] = [];
-  const commandChildren: EventEmitter[] = [];
-  const shellChildren: EventEmitter[] = [];
+  const commandChildren: FakeChild[] = [];
+  const shellChildren: FakeChild[] = [];
   const ctx = makeCtx(cwd, toasts);
 
   registerExtension(pi, {
@@ -182,20 +199,26 @@ test("default process launchers report child errors and nonzero exits once, but 
   await tools[0]!.execute("call-2", { title: "T", content: "C" }, undefined, undefined, ctx);
   await flush();
 
-  commandChildren[0]!.emit("exit", 7, null);
+  assert.equal(commandChildren[0]!.stdout.unrefCalls, 1);
+  assert.equal(commandChildren[0]!.stderr.unrefCalls, 1);
+  commandChildren[0]!.stdout.emit("data", Buffer.from("partial result\n"));
+  commandChildren[0]!.stderr.emit("data", Buffer.from("service timeout\n"));
+  commandChildren[0]!.emit("close", 7, null);
   commandChildren[0]!.emit("error", new Error("late duplicate"));
   shellChildren[0]!.emit("error", new Error("spawn EACCES"));
-  shellChildren[0]!.emit("exit", 1, null);
-  shellChildren[1]!.emit("exit", null, "SIGTERM");
+  shellChildren[0]!.emit("close", 1, null);
+  shellChildren[1]!.emit("close", null, "SIGTERM");
   shellChildren[1]!.emit("error", new Error("late signal duplicate"));
   assert.deepEqual(toasts, [
     {
-      message: "pi-notify · event:agent_settled · cmd action failed: Notification command exited with code 7",
+      message:
+        "pi-notify · event:agent_settled · cmd action failed: Notification command exited with code 7\nstdout:\npartial result\nstderr:\nservice timeout",
       type: "error",
     },
     { message: "pi-notify · hook:agent-notify · shell action failed: spawn EACCES", type: "error" },
     {
-      message: "pi-notify · hook:agent-notify · shell action failed: Notification shell exited with signal SIGTERM",
+      message:
+        "pi-notify · hook:agent-notify · shell action failed: Notification shell exited with signal SIGTERM\nstdout: <empty>\nstderr: <empty>",
       type: "error",
     },
   ]);
@@ -205,9 +228,53 @@ test("default process launchers report child errors and nonzero exits once, but 
   await flush();
   const warningCount = warnings.length;
   await handlers.get("session_shutdown")?.({ type: "session_shutdown" }, ctx);
-  commandChildren[1]!.emit("exit", 9, null);
+  commandChildren[1]!.emit("close", 9, null);
   assert.equal(toasts.length, 3);
   assert.equal(warnings.length, warningCount);
+});
+
+test("failed process output is bounded and successful output stays silent", async () => {
+  const { agentDir, cwd } = await fixture({
+    events: { agent_settled: { actions: ["cmd:large-failure", "cmd:success"] } },
+  });
+  const { handlers, pi } = createHarness();
+  const toasts: Toast[] = [];
+  const warnings: string[] = [];
+  const children: FakeChild[] = [];
+  const ctx = makeCtx(cwd, toasts);
+
+  registerExtension(pi, {
+    agentDir,
+    launchOsc: () => undefined,
+    launchCommand: createCommandLauncher({
+      spawn: () => {
+        const child = fakeChild();
+        children.push(child);
+        return child;
+      },
+      warn: (message) => warnings.push(message),
+    }),
+    launchShell: () => undefined,
+    warn: (message) => warnings.push(message),
+  });
+  await handlers.get("session_start")?.({ type: "session_start" }, ctx);
+  await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx);
+  await flush();
+
+  children[0]!.stdout.emit("data", Buffer.from(`BEGIN-${"x".repeat(5_000)}-END`));
+  children[0]!.stderr.emit("data", Buffer.from("stderr\u001b]8;;https://example.invalid\u0007 detail"));
+  children[0]!.emit("close", 2, null);
+  children[1]!.stdout.emit("data", Buffer.from("successful output"));
+  children[1]!.emit("close", 0, null);
+
+  assert.equal(toasts.length, 1);
+  assert.match(toasts[0]!.message, /Notification command exited with code 2/);
+  assert.match(toasts[0]!.message, /stdout:\nBEGIN-/);
+  assert.match(toasts[0]!.message, /…\[truncated\]/);
+  assert.doesNotMatch(toasts[0]!.message, /-END/);
+  assert.match(toasts[0]!.message, /stderr:\nstderr]8;;https:\/\/example\.invalid detail/);
+  assert.doesNotMatch(toasts[0]!.message, /\u001b|\u0007/);
+  assert.equal(warnings.length, 1);
 });
 
 test("sync spawn and unref failures report exactly once to stderr and TUI", async () => {
