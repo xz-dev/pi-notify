@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-import { readFileSync, rmSync } from "node:fs";
+import { stdin } from "node:process";
 
 /**
  * Optional ntfy companion for the pi-notify examples.
  *
- * Copy this file to $HOME/.pi/agent, replace YOUR_PRIVATE_TOPIC, chmod 700,
- * and reference it from a portable cmd: action so the host shell expands $HOME.
+ * Copy this file to $PI_CODING_AGENT_DIR (normally $HOME/.pi/agent),
+ * replace YOUR_PRIVATE_TOPIC, chmod 700, and launch it from the documented js: action.
  */
 
 const NTFY_URL = "https://ntfy.sh/YOUR_PRIVATE_TOPIC";
@@ -45,17 +45,10 @@ let tag;
 
 if (mode === "question") {
   title = `❓ Pi Question · ${hostname} · ${cwd}`;
-  const bodyFile = env.PI_NOTIFY_QUESTION_BODY_FILE;
-  if (bodyFile) {
-    try {
-      message = cleanBody(readFileSync(bodyFile, "utf8"));
-    } catch {
-      message = "";
-    }
-    rmSync(bodyFile, { force: true });
-  } else {
-    message = cleanBody(env.PI_NOTIFY_QUESTION_BODY);
-  }
+  stdin.setEncoding("utf8");
+  let question = "";
+  for await (const chunk of stdin) question += chunk;
+  message = cleanBody(question);
   if (!message) process.exit(0);
   tag = "input-required";
 } else if (mode === "agent") {

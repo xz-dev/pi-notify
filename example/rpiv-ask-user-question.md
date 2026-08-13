@@ -60,7 +60,7 @@ mkdir -p "$agent_dir"
 install -m 700 example/pi-notify-ntfy.mjs "$agent_dir/pi-notify-ntfy.mjs"
 ```
 
-The example action resolves `$PI_CODING_AGENT_DIR` (or `~/.pi/agent`) at runtime and starts this helper with `process.execPath`; it does not hardcode `/usr/bin/node`. It uses a unique body filename per tool call, so overlapping notifications do not overwrite each other. Treat a real ntfy topic URL like a credential.
+The example action resolves `$PI_CODING_AGENT_DIR` (or `~/.pi/agent`) at runtime and starts this helper through `node` resolved from `PATH`; it does not hardcode an executable path. Each child receives its question body through its own stdin pipe, so no temporary file or shared mutable state exists and overlapping notifications stay isolated. Treat a real ntfy topic URL like a credential.
 
 ```json
 {
@@ -69,7 +69,7 @@ The example action resolves `$PI_CODING_AGENT_DIR` (or `~/.pi/agent`) at runtime
       "delayMs": 0,
       "actions": [
         "bel",
-        "js:const questions=event?.args?.questions?.map((item)=>item?.question).filter((question)=>typeof question==='string'&&question.length>0)??[];const body=questions.length===1?questions[0]:questions.map((question,index)=>`${index+1}. ${question}`).join('\\n');if(body){const fs=process.getBuiltinModule('node:fs');const path=process.getBuiltinModule('node:path');const agentDir=process.env.PI_CODING_AGENT_DIR??path.join(process.env.HOME??'.','.pi','agent');const callId=String(event?.toolCallId??Date.now()).replace(/[^a-zA-Z0-9._-]/g,'_');const bodyFile=path.join(agentDir,`pi-notify-question-body-${callId}-${Math.random().toString(36).slice(2)}.txt`);const helper=path.join(agentDir,'pi-notify-ntfy.mjs');fs.writeFileSync(bodyFile,body,{mode:0o600});const child=process.getBuiltinModule('node:child_process').spawn(process.execPath,[helper],{detached:true,stdio:'ignore',env:{...process.env,PI_NOTIFY_DELIVERY_MODE:'question',PI_NOTIFY_QUESTION_BODY_FILE:bodyFile,PI_NOTIFY_HOSTNAME:notification.hostname??'',PI_NOTIFY_CWD:notification.cwd,PI_NOTIFY_SESSION_ID:notification.sessionId}});child.unref();notification.osc(`❓ Pi Question · ${notification.hostname} · ${notification.cwd}`,body)}"
+        "js:const questions=event?.args?.questions?.map((item)=>item?.question).filter((question)=>typeof question==='string'&&question.length>0)??[];const body=questions.length===1?questions[0]:questions.map((question,index)=>`${index+1}. ${question}`).join('\\n');if(body){const path=process.getBuiltinModule('node:path');const agentDir=process.env.PI_CODING_AGENT_DIR??path.join(process.getBuiltinModule('node:os').homedir(),'.pi','agent');const helper=path.join(agentDir,'pi-notify-ntfy.mjs');const child=process.getBuiltinModule('node:child_process').spawn('node',[helper,'question'],{detached:true,stdio:['pipe','ignore','ignore'],env:{...process.env,PI_NOTIFY_HOSTNAME:notification.hostname??'',PI_NOTIFY_CWD:notification.cwd,PI_NOTIFY_SESSION_ID:notification.sessionId}});child.on('error',()=>{});child.stdin.on('error',()=>{});child.stdin.end(body);child.unref();notification.osc(`❓ Pi Question · ${notification.hostname} · ${notification.cwd}`,body)}"
       ]
     }
   }
@@ -91,7 +91,7 @@ The action reads only `event.args.questions[].question`:
 - `cleanHeader` makes status title, hostname, cwd, and session ID single-line by normalizing CR, LF, U+2028, and U+2029 and stripping C0/C1 controls.
 - The cwd inserted into the ask-user message is passed through `cleanHeader`, so a newline-bearing path cannot create extra body lines.
 - `cleanBody` preserves LF for real multiline message content and strips other C0/C1 controls.
-- The detached helper uses `fetch`, a 15-second bound, and ignored stdio; no host-shell string is constructed.
+- The detached helper reads question text from its private stdin pipe, then uses `fetch` with a 15-second bound; no temporary file, shared path, environment-sized body, or host-shell string is involved.
 - OSC and ntfy launch paths are independent and non-blocking.
 - The hostname tag permits only lowercase ASCII letters/digits, `.`, `_`, and `-`; unsafe runs become `-`, with `unknown-host` as fallback.
 

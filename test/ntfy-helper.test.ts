@@ -80,12 +80,19 @@ test("ntfy companion publishes multilingual title and body as UTF-8 JSON", async
   });
 });
 
-test("ntfy companion publishes question text from a body file", async () => {
+test("ntfy companion publishes question text from stdin", async () => {
   let requestBody: string | undefined;
   let resolveRequest!: () => void;
   const received = new Promise<void>((resolve) => {
     resolveRequest = resolve;
   });
+  const requestTimedOut = AbortSignal.timeout(5_000);
+  const requestOrTimeout = Promise.race([
+    received,
+    new Promise<never>((_, reject) =>
+      requestTimedOut.addEventListener("abort", () => reject(new Error("ntfy request not received")), { once: true }),
+    ),
+  ]);
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -105,23 +112,29 @@ test("ntfy companion publishes question text from a body file", async () => {
   assert.ok(address && typeof address !== "string");
   const root = await mkdtemp(join(tmpdir(), "pi-notify-ntfy-question-"));
   const helperPath = join(root, "pi-notify-ntfy.mjs");
-  const bodyFile = join(root, "question-body.txt");
   await writeFile(helperPath, await helperSource(`http://127.0.0.1:${address.port}/test-topic`));
-  await writeFile(bodyFile, "1. First question?\n2. Second question?");
 
   try {
-    await execFileAsync(process.execPath, [helperPath], {
-      env: {
-        ...process.env,
-        PI_NOTIFY_DELIVERY_MODE: "question",
-        PI_NOTIFY_QUESTION_BODY_FILE: bodyFile,
-        PI_NOTIFY_HOSTNAME: "workstation",
-        PI_NOTIFY_CWD: "/work/project",
-        PI_NOTIFY_SESSION_ID: "session-two",
-      },
-      timeout: 10_000,
-    });
-    await received;
+    await Promise.all([
+      new Promise<void>((resolve, reject) => {
+        const child = execFile(
+          process.execPath,
+          [helperPath, "question"],
+          {
+            env: {
+              ...process.env,
+              PI_NOTIFY_HOSTNAME: "workstation",
+              PI_NOTIFY_CWD: "/work/project",
+              PI_NOTIFY_SESSION_ID: "session-two",
+            },
+            timeout: 10_000,
+          },
+          (error) => (error ? reject(error) : resolve()),
+        );
+        child.stdin?.end("1. First question?\n2. Second question?");
+      }),
+      requestOrTimeout,
+    ]);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
@@ -135,28 +148,60 @@ test("ntfy companion publishes question text from a body file", async () => {
   });
 });
 
-test("ntfy companion removes the question body file after reading it", async () => {
-  const root = await mkdtemp(join(tmpdir(), "pi-notify-ntfy-question-cleanup-"));
+test("ntfy companion isolates concurrent question bodies", async () => {
+  const requestBodies: string[] = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      requestBodies.push(Buffer.concat(chunks).toString("utf8"));
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end('{"id":"accepted"}');
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const root = await mkdtemp(join(tmpdir(), "pi-notify-ntfy-concurrent-"));
   const helperPath = join(root, "pi-notify-ntfy.mjs");
-  const bodyFile = join(root, "question-body.txt");
-  await writeFile(helperPath, await helperSource("https://ntfy.sh/invalid/topic"));
-  await writeFile(bodyFile, "question");
+  await writeFile(helperPath, await helperSource(`http://127.0.0.1:${address.port}/test-topic`));
 
   try {
-    await assert.rejects(
-      execFileAsync(process.execPath, [helperPath], {
-        env: {
-          ...process.env,
-          PI_NOTIFY_DELIVERY_MODE: "question",
-          PI_NOTIFY_QUESTION_BODY_FILE: bodyFile,
-        },
-        timeout: 10_000,
-      }),
-    );
-    await assert.rejects(readFile(bodyFile), { code: "ENOENT" });
+    const deliver = (index: number) =>
+      new Promise<void>((resolve, reject) => {
+        const child = execFile(
+          process.execPath,
+          [helperPath, "question"],
+          {
+            env: {
+              ...process.env,
+              PI_NOTIFY_HOSTNAME: "workstation",
+              PI_NOTIFY_CWD: "/work/project",
+              PI_NOTIFY_SESSION_ID: `session-${index}`,
+            },
+            timeout: 10_000,
+          },
+          (error) => (error ? reject(error) : resolve()),
+        );
+        child.stdin?.end(`Question ${index}?`);
+      });
+    for (let index = 0; index < 12; index += 4) {
+      await Promise.all(Array.from({ length: 4 }, (_, offset) => deliver(index + offset)));
+    }
   } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(root, { recursive: true, force: true });
   }
+
+  const messages = requestBodies
+    .map((body) => (JSON.parse(body) as NtfyRequest).message)
+    .sort();
+  const expected = Array.from({ length: 12 }, (_, index) => `Question ${index}?\nsession id: session-${index}`).sort();
+  assert.deepEqual(messages, expected);
 });
 
 test("ntfy companion rejects an invalid topic with a controlled diagnostic", async () => {
