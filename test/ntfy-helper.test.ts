@@ -80,6 +80,59 @@ test("ntfy companion publishes multilingual title and body as UTF-8 JSON", async
   });
 });
 
+test("ntfy companion publishes a typed continue notification", async () => {
+  let requestBody: string | undefined;
+  let resolveRequest!: () => void;
+  const received = new Promise<void>((resolve) => {
+    resolveRequest = resolve;
+  });
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      requestBody = Buffer.concat(chunks).toString("utf8");
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end('{"id":"accepted"}');
+      resolveRequest();
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const root = await mkdtemp(join(tmpdir(), "pi-notify-ntfy-continue-"));
+  const helperPath = join(root, "pi-notify-ntfy.mjs");
+  await writeFile(helperPath, await helperSource(`http://127.0.0.1:${address.port}/test-topic`));
+
+  try {
+    await execFileAsync(process.execPath, [helperPath, "continue"], {
+      env: {
+        ...process.env,
+        PI_NOTIFY_REASON_TYPE: "verifying",
+        PI_NOTIFY_REASON: "Tests still need to run.",
+        PI_NOTIFY_HOSTNAME: "workstation",
+        PI_NOTIFY_CWD: "/work/project",
+        PI_NOTIFY_SESSION_ID: "session-continue",
+      },
+      timeout: 10_000,
+    });
+    await received;
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+
+  assert.deepEqual(JSON.parse(requestBody ?? "") as NtfyRequest, {
+    topic: "test-topic",
+    title: "▶️ Pi Continue · workstation · /work/project",
+    message: "VERIFYING · Tests still need to run.\nsession id: session-continue",
+    tags: ["continue", "workstation"],
+  });
+});
+
 test("ntfy companion publishes question text from stdin", async () => {
   let requestBody: string | undefined;
   let resolveRequest!: () => void;

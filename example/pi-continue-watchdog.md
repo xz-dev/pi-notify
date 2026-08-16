@@ -8,7 +8,8 @@ This standalone recipe connects [`pi-continue-watchdog`](https://github.com/xz-d
 pi-continue-watchdog                         pi-notify
         |                                       |
         | pi.events.emit(                       | hooks["user-ready"]
-        |   "pi:semantic-hook:v1", envelope) -->| hooks["agent-notify"]
+        |   "pi:semantic-hook:v1", envelope) -->| hooks["watchdog-continued"]
+        |                                       | hooks["agent-notify"]
         |                                       |
         |                                       +-- terminal OSC / Windows toast
         |                                       +-- detached curl POST to ntfy
@@ -24,7 +25,7 @@ The watchdog publishes `user-ready` at most once for the applicable aggregate-id
 | `EXHAUSTED` | none | `🛑 Pi Continue stopped` |
 | `DECISION_FAILED` | none | `⚠️ Pi Continue failed` |
 
-It does **not** publish for manual unlock, main-agent abort, a valid intermediate continue, ordinary unlocked idle, or a still-busy observable child.
+A separately configured `watchdog-continued` hook is published after each accepted continue has been durably recorded. It carries validated `REASON_TYPE` and `REASON` values. Manual unlock, main-agent abort, ordinary unlocked idle, and a still-busy observable child remain silent.
 
 Example envelope:
 
@@ -35,6 +36,19 @@ Example envelope:
   "values": {
     "STOP_KIND": "AI_UNLOCK",
     "REASON": "Waiting for user confirmation"
+  }
+}
+```
+
+An accepted continue envelope is:
+
+```json
+{
+  "version": 1,
+  "name": "watchdog-continued",
+  "values": {
+    "REASON_TYPE": "VERIFYING",
+    "REASON": "Tests still need to run."
   }
 }
 ```
@@ -73,6 +87,7 @@ Hostname resolution prefers `process.env.HOSTNAME`; when it is undefined, the re
 
 | Source | Status title | Message | Semantic ntfy tag |
 | --- | --- | --- | --- |
+| `watchdog-continued` | `▶️ Pi Continue` | `<REASON_TYPE> · <REASON>` | `continue` |
 | `AI_UNLOCK` | `🙋 Pi Done` | producer `REASON` | `done` |
 | `EXHAUSTED` | `🛑 Pi Continue stopped` | `Continue watchdog retry limit reached` | `retry-limit` |
 | `DECISION_FAILED` | `⚠️ Pi Continue failed` | `Continue watchdog decision failed` | `decision-failed` |
@@ -105,6 +120,14 @@ Write the following nested config to `$PI_CODING_AGENT_DIR/pi-notify.json` (norm
 ```json
 {
   "hooks": {
+    "watchdog-continued": {
+      "delayMs": 0,
+      "actions": [
+        "bel",
+        "osc:▶️ Pi Continue · {{HOSTNAME}} · {{CWD}}|{{REASON_TYPE}} · {{REASON}}\nsession id: {{SESSION_ID}}",
+        "cmd:\"$PI_CODING_AGENT_DIR/pi-notify-ntfy.mjs\" continue"
+      ]
+    },
     "user-ready": {
       "delayMs": 0,
       "actions": [
@@ -155,8 +178,8 @@ Kitty protocol reference: <https://sw.kovidgoyal.net/kitty/desktop-notifications
 
 2. Put a fake `curl` earlier in `PATH` that records argv to a mode-600 temporary file and performs no network request.
 3. Start a fresh isolated Pi process/runtime in a known cwd and use a known session ID.
-4. Exercise `AI_UNLOCK`, `EXHAUSTED`, `DECISION_FAILED`, and `agent_notify`.
-5. Assert one OSC attempt and one curl attempt per valid event; manual unlock, abort, intermediate continue, unknown stop kinds, and malformed agent values must remain silent.
+4. Exercise `watchdog-continued`, `AI_UNLOCK`, `EXHAUSTED`, `DECISION_FAILED`, and `agent_notify`.
+5. Assert one OSC attempt and one ntfy attempt per valid event; manual unlock, abort, unknown stop kinds, and malformed values must remain silent.
 6. Verify title order is status → hostname → absolute cwd, body ends with one `session id:` line, and curl has two tags.
 7. Include hostile CR/LF/U+2028/U+2029 in title metadata and verify the `Title:` header remains one line; include LF in message content and verify the body retains it.
 

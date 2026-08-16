@@ -56,6 +56,13 @@ if (mode === "question") {
   title = `🤖 ${cleanHeader(env.PI_NOTIFY_TITLE)} · ${hostname} · ${cwd}`;
   message = cleanBody(env.PI_NOTIFY_CONTENT);
   tag = "agent";
+} else if (mode === "continue") {
+  const reasonType = cleanHeader(env.PI_NOTIFY_REASON_TYPE).trim().toUpperCase();
+  const reason = cleanBody(env.PI_NOTIFY_REASON).trim();
+  if (!reasonType || !reason) process.exit(0);
+  title = `▶️ Pi Continue · ${hostname} · ${cwd}`;
+  message = `${reasonType} · ${reason}`;
+  tag = "continue";
 } else if (mode === "user-ready") {
   if (env.PI_NOTIFY_STOP_KIND === "AI_UNLOCK") {
     title = `🙋 Pi Done · ${hostname} · ${cwd}`;
@@ -73,7 +80,7 @@ if (mode === "question") {
     process.exit(0);
   }
 } else {
-  process.stderr.write("Usage: pi-notify-ntfy.mjs question|agent|user-ready\n");
+  process.stderr.write("Usage: pi-notify-ntfy.mjs question|agent|continue|user-ready\n");
   process.exit(2);
 }
 
