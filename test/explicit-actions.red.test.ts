@@ -6,7 +6,7 @@ import test from "node:test";
 
 import registerExtension, { type NotificationRuntime } from "../index.js";
 import { loadConfig } from "../src/config.js";
-import { SEMANTIC_HOOK_CHANNEL } from "../src/semantic-hook.js";
+import { SEMANTIC_HOOK_CHANNEL } from "pi-extension-utils/semantic-hook";
 
 async function fixture(): Promise<{ agentDir: string; cwd: string }> {
   const root = await import("node:fs/promises").then(({ mkdtemp }) => mkdtemp(join(tmpdir(), "pi-notify-red-")));

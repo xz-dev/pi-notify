@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -42,6 +42,7 @@ interface PackedFixture {
   agentDir: string;
   cwd: string;
   packageDir: string;
+  utilityPackageDir: string;
   producerPath: string;
   markerPath: string;
 }
@@ -101,6 +102,13 @@ async function makePackedFixture(): Promise<PackedFixture> {
   const tarballName = stdout.trim().split("\n").at(-1) ?? "";
   const tarball = join(packDir, tarballName);
   await execFileAsync("npm", ["init", "-y"], { cwd: installRoot, timeout: 30_000 });
+  const utilityTarball = process.env.PI_EXTENSION_UTILS_E2E_TARBALL;
+  if (utilityTarball) {
+    const installManifestPath = join(installRoot, "package.json");
+    const installManifest = JSON.parse(await readFile(installManifestPath, "utf8")) as Record<string, unknown>;
+    installManifest.overrides = { "pi-extension-utils": utilityTarball };
+    await writeFile(installManifestPath, JSON.stringify(installManifest));
+  }
   await execFileAsync(
     "npm",
     ["install", "--prefer-offline", "--ignore-scripts", "--no-audit", "--no-fund", tarball],
@@ -112,6 +120,12 @@ async function makePackedFixture(): Promise<PackedFixture> {
     pi?: { extensions?: string[]; skills?: string[] };
   };
   const packageDir = join(installRoot, "node_modules", manifest.name);
+  const utilityPackageDir = join(installRoot, "node_modules", "pi-extension-utils");
+  assert.equal((await lstat(utilityPackageDir)).isSymbolicLink(), false);
+  const installedUtilityManifest = JSON.parse(
+    await readFile(join(utilityPackageDir, "package.json"), "utf8"),
+  ) as { exports?: Record<string, unknown> };
+  assert.ok(installedUtilityManifest.exports?.["./semantic-hook"]);
   const inventory = await readdir(packageDir);
   assert.equal(inventory.includes("index.ts"), true);
   assert.equal(inventory.includes("src"), true);
@@ -120,26 +134,22 @@ async function makePackedFixture(): Promise<PackedFixture> {
   assert.deepEqual(manifest.pi?.skills, ["./skills"]);
 
   const markerPath = join(root, "marker.jsonl");
-  const producerPath = join(root, "neutral-producer.mjs");
+  const producerPath = join(installRoot, "neutral-producer.mjs");
   await writeFile(
     producerPath,
-    `export default function registerProducer(pi) {
+    `import { publishSemanticHook } from "pi-extension-utils/semantic-hook";
+export default function registerProducer(pi) {
   let emissions = 0;
   pi.on("session_start", () => {
-    // Independent producer: knows only the neutral channel and schema.
     setTimeout(() => {
       emissions += 1;
-      pi.events.emit(
-        "pi:semantic-hook:v1",
-        Object.freeze({
-          version: 1,
-          name: "build-finished",
-          values: Object.freeze({
-            RESULT: "SUCCESS",
-            BUILD_ID: "e2e-" + emissions,
-          }),
-        }),
-      );
+      publishSemanticHook(pi.events, {
+        name: "build-finished",
+        values: {
+          RESULT: "SUCCESS",
+          BUILD_ID: "e2e-" + emissions,
+        },
+      });
     }, 25);
   });
 }
@@ -187,7 +197,7 @@ async function makePackedFixture(): Promise<PackedFixture> {
     }),
   );
 
-  return { root, agentDir, cwd, packageDir, producerPath, markerPath };
+  return { root, agentDir, cwd, packageDir, utilityPackageDir, producerPath, markerPath };
 }
 
 async function readMarkers(path: string): Promise<Array<Record<string, unknown>>> {
@@ -228,6 +238,15 @@ test(
         "utf8",
       );
       assert.match(skillBody, /pi:semantic-hook:v1/);
+      assert.equal(
+        await readFile(join(fixture.utilityPackageDir, "dist", "semantic-hook.js"), "utf8").then(
+          (source) =>
+            source.includes("function publishSemanticHook") &&
+            source.includes("function subscribeSemanticHooks"),
+        ),
+        true,
+        "isolated fixture must use packed pi-extension-utils semantic-hook implementation",
+      );
 
       // --- Shared EventBus + public discoverAndLoadExtensions for packed notify + independent producer ---
       const bus = createEventBus();

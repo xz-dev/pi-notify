@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "test": "node --import tsx --test test/*.test.ts",
+    "test:e2e:packed-hooks": "node --import tsx --test test/e2e-packed-neutral-hooks.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "pi": {
@@ -54,6 +55,7 @@
   },
   "homepage": "https://github.com/xz-dev/pi-notify#readme",
   "dependencies": {
+    "pi-extension-utils": "git+https://github.com/xz-dev/pi-extension-utils.git#fc15bcfa8bc2f5ad56fe5db69137c9a0e29fb6b0",
     "typebox": "^1.3.11"
   }
 }

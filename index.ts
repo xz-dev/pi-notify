@@ -14,10 +14,10 @@ import { getHookBinding, loadConfig } from "./src/config.js";
 import { createOscLauncher } from "./src/osc.js";
 import { resolvePowerShell } from "./src/powershell.js";
 import {
-  SEMANTIC_HOOK_CHANNEL,
-  parseSemanticHook,
+  publishSemanticHook,
+  subscribeSemanticHooks,
   type SemanticHookV1,
-} from "./src/semantic-hook.js";
+} from "pi-extension-utils/semantic-hook";
 import type {
   ActionExecutionObserver,
   LifecycleEventKey,
@@ -332,14 +332,9 @@ export default function registerExtension(pi: ExtensionAPI, runtime: Notificatio
     }
   }
 
-  function handleSemanticHook(data: unknown, ctx: ExtensionContext): void {
+  function handleSemanticHook(envelope: SemanticHookV1, ctx: ExtensionContext): void {
     if (state.cleaned) return;
-    const parsed = parseSemanticHook(data);
-    if (!parsed.ok) {
-      runtime.warn(`Ignoring invalid semantic hook envelope: ${parsed.reason}`);
-      return;
-    }
-    void dispatchHook(parsed.envelope, ctx);
+    void dispatchHook(envelope, ctx);
   }
 
   async function dispatchHook(envelope: SemanticHookV1, ctx: ExtensionContext): Promise<void> {
@@ -390,16 +385,13 @@ export default function registerExtension(pi: ExtensionAPI, runtime: Notificatio
         content: Type.String({ description: "User-facing notification content/body" }),
       }),
       async execute(_toolCallId, params) {
-        const envelope = Object.freeze({
-          version: 1 as const,
+        publishSemanticHook(pi.events, {
           name: AGENT_NOTIFY_HOOK,
-          values: Object.freeze({
+          values: {
             TITLE: params.title,
             CONTENT: params.content,
-          }),
+          },
         });
-        // Synchronous construction/emit only. Consumer failures never feed back.
-        pi.events.emit(SEMANTIC_HOOK_CHANNEL, envelope);
         return {
           content: [{ type: "text", text: "Notification hook published" }],
           details: undefined,
@@ -414,9 +406,11 @@ export default function registerExtension(pi: ExtensionAPI, runtime: Notificatio
       runtime.warn("pi.events is unavailable; semantic hook consumer is disabled for this attachment");
       return;
     }
-    state.unsubscribeBus = pi.events.on(SEMANTIC_HOOK_CHANNEL, (data) => {
-      handleSemanticHook(data, ctx);
-    });
+    state.unsubscribeBus = subscribeSemanticHooks(
+      pi.events,
+      (envelope) => handleSemanticHook(envelope, ctx),
+      (reason) => runtime.warn(`Ignoring invalid semantic hook envelope: ${reason}`),
+    );
   }
 
   pi.on("session_start", async (_event, ctx) => {

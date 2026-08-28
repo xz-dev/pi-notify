@@ -7,7 +7,7 @@ import {
   isPlainObject,
   MAX_DIAGNOSTIC_SNIPPET,
   readOwnDataProperty,
-} from "./semantic-hook.js";
+} from "./config-value.js";
 import {
   LEGACY_TOP_LEVEL_KEYS,
   LIFECYCLE_EVENT_KEYS,

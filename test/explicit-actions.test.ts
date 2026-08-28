@@ -10,7 +10,7 @@ import { createCommandLauncher, createShellLauncher } from "../src/command.js";
 import { createNotificationEnvironment, renderTemplate } from "../src/context.js";
 import { createOscLauncher } from "../src/osc.js";
 import { isBarePowerShellExe, resolvePowerShell } from "../src/powershell.js";
-import { SEMANTIC_HOOK_CHANNEL } from "../src/semantic-hook.js";
+import { SEMANTIC_HOOK_CHANNEL } from "pi-extension-utils/semantic-hook";
 
 async function fixture(): Promise<{ agentDir: string; cwd: string }> {
   const root = await import("node:fs/promises").then(({ mkdtemp }) => mkdtemp(join(tmpdir(), "pi-notify-explicit-")));

@@ -9,7 +9,7 @@ import { loadConfig } from "../src/config.js";
 import {
   SEMANTIC_HOOK_CHANNEL,
   parseSemanticHook,
-} from "../src/semantic-hook.js";
+} from "pi-extension-utils/semantic-hook";
 import { createTemplateValues, createNotificationEnvironment, renderTemplate } from "../src/context.js";
 
 async function fixture(): Promise<{ agentDir: string; cwd: string; root: string }> {
