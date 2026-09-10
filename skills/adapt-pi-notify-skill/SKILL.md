@@ -117,7 +117,20 @@ or:
 }
 ```
 
-AI decision unlock uses the producer's existing validated reason. Human unlock and user/manual abort are intentionally silent. This is an example of producer-owned semantics, not a pi-notify dependency.
+AI decision unlock uses the producer's existing validated reason. Human unlock and user/manual abort are intentionally silent. Continue also publishes `watchdog-continued` with `REASON_TYPE`/`REASON` and `watchdog-waiting` with `REASON`/decimal-string `WAIT_SECONDS` (no `REASON_TYPE`). Intermediate, cancelled, stale, invalid, and human-owned states remain silent; consumer must not infer them.
+
+`pi-reflect-watchdog` independently publishes `reflection-completed` with `REFLECTION_TYPE`, `REASON`, and `NEXT_STEP`; current types are `NO_ISSUE` and `ROUTE_CORRECTION`. Producer clips hook fields over 4096 UTF-16 code units while durable report keeps full values, and publishes only after durable completion.
+
+Public integration and backend recipes:
+
+- [`agent_notify`](../../example/agent-notify.md)
+- [`ask_user_question`](../../example/rpiv-ask-user-question.md)
+- [`pi-continue-watchdog`](../../example/pi-continue-watchdog.md)
+- [`pi-reflect-watchdog`](../../example/pi-reflect-watchdog.md)
+- [`ntfy helper`](../../example/pi-notify-ntfy.md)
+- [`Bark helper`](../../example/pi-notify-bark.md)
+
+Both helpers support `question`, `agent`, `continue`, `wait`, `reflect`, and `user-ready`. They are copied owner-only, use `NTFY_URL` or `BARK_URL` + `BARK_DEVICE_KEY`, read question content from stdin, and are independently composable through separate `cmd:"$HOME/..."` actions. Verify with loopback fixtures only.
 
 ## pi-notify Consumer Configuration
 

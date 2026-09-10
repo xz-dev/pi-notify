@@ -309,11 +309,19 @@ Zellij and GNU Screen do not provide equivalent passthrough support here.
 
 ## Examples
 
-- [`agent_notify` with BEL, templates, and optional ntfy](./example/agent-notify.md)
+Integration guides:
+
+- [`agent_notify` with BEL, templates, and optional backends](./example/agent-notify.md)
 - [`ask_user_question` lifecycle notifications](./example/rpiv-ask-user-question.md)
 - [`pi-continue-watchdog` semantic-hook notifications](./example/pi-continue-watchdog.md)
+- [`pi-reflect-watchdog` semantic-hook notifications](./example/pi-reflect-watchdog.md)
 
-Examples prefer built-in `bel`, templated `osc:`, and direct `shell:` actions. Use `js:` only when behavior is genuinely conditional.
+Standalone backend helpers:
+
+- [`ntfy` helper and contract](./example/pi-notify-ntfy.md)
+- [`Bark` helper and contract](./example/pi-notify-bark.md)
+
+Examples prefer built-in `bel`, templated `osc:`, and direct `cmd:` actions. Use `js:` only when behavior is genuinely conditional. Backend helpers are independently invocable; add separate ntfy and Bark actions to compose both.
 
 To adapt another extension as a neutral producer, see the packaged skill `adapt-pi-notify-skill`.
 

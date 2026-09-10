@@ -6,9 +6,17 @@ const skillPath = new URL("../skills/adapt-pi-notify-skill/SKILL.md", import.met
 const packagePath = new URL("../package.json", import.meta.url);
 
 test("adapt-pi-notify skill is packaged with the accepted neutral-hook contract", async () => {
-  const [skill, manifestSource] = await Promise.all([
+  const [skill, manifestSource, ...guides] = await Promise.all([
     readFile(skillPath, "utf8"),
     readFile(packagePath, "utf8"),
+    ...[
+      "agent-notify.md",
+      "rpiv-ask-user-question.md",
+      "pi-continue-watchdog.md",
+      "pi-reflect-watchdog.md",
+      "pi-notify-ntfy.md",
+      "pi-notify-bark.md",
+    ].map((name) => readFile(new URL(`../example/${name}`, import.meta.url), "utf8")),
   ]);
   const manifest = JSON.parse(manifestSource) as { files?: string[] };
 
@@ -35,6 +43,21 @@ test("adapt-pi-notify skill is packaged with the accepted neutral-hook contract"
   assert.match(skill, /notification\.values/);
   assert.match(skill, /notification\.osc\("Pi", notification\.values\.REASON\)/);
   assert.match(skill, /notification\.bel\(\)/);
+  assert.match(skill, /watchdog-continued/);
+  assert.match(skill, /watchdog-waiting/);
+  assert.match(skill, /WAIT_SECONDS/);
+  assert.match(skill, /reflection-completed/);
+  assert.match(skill, /REFLECTION_TYPE/);
+  assert.match(skill, /NEXT_STEP/);
+  assert.match(skill, /NO_ISSUE/);
+  assert.match(skill, /ROUTE_CORRECTION/);
+  assert.match(skill, /pi-notify-ntfy\.md/);
+  assert.match(skill, /pi-notify-bark\.md/);
+  assert.match(skill, /question.*agent.*continue.*wait.*reflect.*user-ready/s);
+  assert.match(skill, /NTFY_URL/);
+  assert.match(skill, /BARK_URL/);
+  assert.match(skill, /BARK_DEVICE_KEY/);
+  assert.match(skill, /loopback fixtures/);
   assert.doesNotMatch(skill, /Planned API/);
   assert.doesNotMatch(skill, /not available in the current pre-neutral-hooks pi-notify runtime/);
 
@@ -46,4 +69,17 @@ test("adapt-pi-notify skill is packaged with the accepted neutral-hook contract"
 
   assert.equal(manifest.files?.includes("skills"), true);
   assert.equal(manifest.files?.includes("example"), true);
+  for (const path of [
+    "example/agent-notify.md",
+    "example/rpiv-ask-user-question.md",
+    "example/pi-continue-watchdog.md",
+    "example/pi-reflect-watchdog.md",
+    "example/pi-notify-ntfy.md",
+    "example/pi-notify-bark.md",
+  ]) assert.equal(manifest.files?.includes(path.split("/")[0]!), true);
+  for (const guide of guides) {
+    assert.match(guide, /pi-notify-(?:ntfy|bark)\.mjs/);
+    assert.match(guide, /127\.0\.0\.1|loopback/);
+    assert.match(guide, /never commit populated|never commit/i);
+  }
 });

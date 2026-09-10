@@ -1,106 +1,32 @@
 # Example: pi-continue-watchdog + pi-notify
 
-This standalone recipe connects [`pi-continue-watchdog`](https://github.com/xz-dev/pi-continue-watchdog) to [pi-notify](https://github.com/xz-dev/pi-notify) through Pi's neutral semantic-hook bus. Neither package imports or detects the other.
+This standalone recipe connects [`pi-continue-watchdog`](https://github.com/xz-dev/pi-continue-watchdog) to [pi-notify](https://github.com/xz-dev/pi-notify) through Pi's neutral semantic-hook bus. Neither package imports, identifies, or waits for the other.
 
-## How it works
+## Contract
 
-```text
-pi-continue-watchdog                         pi-notify
-        |                                       |
-        | pi.events.emit(                       | hooks["user-ready"]
-        |   "pi:semantic-hook:v1", envelope) -->| hooks["watchdog-continued"]
-        |                                       | hooks["agent-notify"]
-        |                                       |
-        |                                       +-- terminal OSC / Windows toast
-        |                                       +-- detached curl POST to ntfy
-```
+Channel is exactly `pi:semantic-hook:v1`. Delivery is best-effort to current listeners only: no acknowledgement, replay, retry, backpressure, or producer wait.
 
-The channel is exactly `pi:semantic-hook:v1`. Delivery is best-effort to current listeners: no acknowledgement, replay, retry, backpressure, or producer wait. The watchdog owns terminal-state semantics; pi-notify only validates, routes, and displays the envelope.
-
-The watchdog publishes `user-ready` at most once for the applicable aggregate-idle epoch:
-
-| `STOP_KIND` | Extra value | Notification |
+| Hook | Producer values | Meaning |
 | --- | --- | --- |
-| `AI_UNLOCK` | validated `REASON` | `🙋 Pi Done` |
-| `EXHAUSTED` | none | `🛑 Pi Continue stopped` |
-| `DECISION_FAILED` | none | `⚠️ Pi Continue failed` |
+| `watchdog-continued` | `REASON_TYPE`, `REASON` | Durable accepted continue; type is normally `WORK_REMAINS` or `VERIFYING`. |
+| `watchdog-waiting` | `REASON`, decimal-string `WAIT_SECONDS` | Durable passive wait. It has **no `REASON_TYPE`** and starts no continuation turn. |
+| `user-ready` | `STOP_KIND` | Automatic terminal state. `AI_UNLOCK` also has producer `REASON_TYPE` + `REASON`; `EXHAUSTED` and `DECISION_FAILED` have no extra fields. |
 
-A separately configured `watchdog-continued` hook is published after each accepted continue has been durably recorded. It carries validated `REASON_TYPE` and `REASON` values. Manual unlock, main-agent abort, ordinary unlocked idle, and a still-busy observable child remain silent.
-
-Example envelope:
+Example wait envelope:
 
 ```json
 {
   "version": 1,
-  "name": "user-ready",
-  "values": {
-    "STOP_KIND": "AI_UNLOCK",
-    "REASON": "Waiting for user confirmation"
-  }
+  "name": "watchdog-waiting",
+  "values": { "REASON": "Waiting for CI.", "WAIT_SECONDS": "300" }
 }
 ```
 
-An accepted continue envelope is:
+`user-ready` terminal kinds map to `AI_UNLOCK` (typed producer reason), `EXHAUSTED` (retry budget exhausted), and `DECISION_FAILED` (three invalid decisions). Manual unlock, main-agent abort, ordinary unlocked idle, intermediate/cancelled/stale/invalid states, and a still-busy child publish no notification. pi-notify must not infer these silent states.
 
-```json
-{
-  "version": 1,
-  "name": "watchdog-continued",
-  "values": {
-    "REASON_TYPE": "VERIFYING",
-    "REASON": "Tests still need to run."
-  }
-}
-```
+## Notification presentation
 
-When `hooks["agent-notify"]` has an action, pi-notify also registers `agent_notify({ title, content })`. Its neutral envelope is:
-
-```json
-{
-  "version": 1,
-  "name": "agent-notify",
-  "values": {
-    "TITLE": "Build finished",
-    "CONTENT": "All tests passed"
-  }
-}
-```
-
-The tool's model-visible success text is exactly `Notification hook published`; consumer delivery failures do not alter that result.
-
-## Notification format
-
-Each title has this shape:
-
-```text
-<status title> · <hostname> · <absolute Pi cwd>
-```
-
-The body ends with a real LF and the session ID:
-
-```text
-<message>
-session id: <SESSION_ID>
-```
-
-Hostname resolution prefers `process.env.HOSTNAME`; when it is undefined, the recipe uses `os.hostname()`. An empty or unsafe result falls back to `unknown-host`. ntfy receives **two** comma-separated tags: the semantic tag and a lowercase, comma-safe hostname tag.
-
-| Source | Status title | Message | Semantic ntfy tag |
-| --- | --- | --- | --- |
-| `watchdog-continued` | `▶️ Pi Continue` | `<REASON_TYPE> · <REASON>` | `continue` |
-| `AI_UNLOCK` | `🙋 Pi Done` | producer `REASON` | `done` |
-| `EXHAUSTED` | `🛑 Pi Continue stopped` | `Continue watchdog retry limit reached` | `retry-limit` |
-| `DECISION_FAILED` | `⚠️ Pi Continue failed` | `Continue watchdog decision failed` | `decision-failed` |
-| `agent-notify` | `🤖 ` + producer `TITLE` | producer `CONTENT` | `agent` |
-
-For fictitious host `example-host` and cwd `/srv/app`, an AI unlock is submitted as:
-
-```text
-Title: 🙋 Pi Done · example-host · /srv/app
-Body:  Waiting for user confirmation
-       session id: <SESSION_ID>
-Tags:  done,example-host
-```
+Helpers append `session id: <SESSION_ID>` to body. Continue uses `▶️ Pi Continue` and `<REASON_TYPE> · <REASON>`. Wait uses `⏳ Pi Waiting` and `<WAIT_SECONDS>s · <REASON>`. Automatic user-ready uses producer-owned reason mapping: `🙋 Pi Done` (`JOB_DONE`), `🙋 Pi Wait` (`WAIT_USER`), `🚧 Pi Blocked` (`JOB_BLOCKED`), fallback `🔔 Pi Ready`, `🛑 Pi Continue stopped`, or `⚠️ Pi Continue failed`.
 
 ## Install
 
@@ -113,9 +39,16 @@ Restart Pi after installation or use Pi's supported reload flow.
 
 ## Configuration
 
-The inline `js:` remains here because this recipe needs conditional `STOP_KIND` routing, shared sanitization, and independent OSC/ntfy delivery. For ordinary fixed text, prefer the built-in `bel`, templated `osc:`, and structured `shell:` actions shown in the other examples.
+Copy one or both standalone helpers owner-only. Configure `NTFY_URL` as a complete topic URL, or `BARK_URL` as a `/push` endpoint plus `BARK_DEVICE_KEY`, in user-owned environment. Never commit populated credentials. See [ntfy](./pi-notify-ntfy.md) and [Bark](./pi-notify-bark.md) for setup and local verification.
 
-Write the following nested config to `$PI_CODING_AGENT_DIR/pi-notify.json` (normally `~/.pi/agent/pi-notify.json`). Replace `YOUR_PRIVATE_TOPIC`; an ntfy topic URL should be treated like a credential and must not be committed.
+```bash
+agent_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+mkdir -p "$agent_dir"
+install -m 700 example/pi-notify-ntfy.mjs "$agent_dir/pi-notify-ntfy.mjs"
+install -m 700 example/pi-notify-bark.mjs "$agent_dir/pi-notify-bark.mjs"
+```
+
+Use separate `cmd:` actions. `$HOME` is expanded by platform shell; helpers receive producer fields through `PI_NOTIFY_*`:
 
 ```json
 {
@@ -124,69 +57,38 @@ Write the following nested config to `$PI_CODING_AGENT_DIR/pi-notify.json` (norm
       "delayMs": 0,
       "actions": [
         "bel",
-        "osc:▶️ Pi Continue · {{HOSTNAME}} · {{CWD}}|{{REASON_TYPE}} · {{REASON}}\nsession id: {{SESSION_ID}}",
-        "cmd:\"$PI_CODING_AGENT_DIR/pi-notify-ntfy.mjs\" continue"
+        "cmd:\"$HOME/.pi/agent/pi-notify-ntfy.mjs\" continue",
+        "cmd:\"$HOME/.pi/agent/pi-notify-bark.mjs\" continue"
+      ]
+    },
+    "watchdog-waiting": {
+      "delayMs": 0,
+      "actions": [
+        "bel",
+        "cmd:\"$HOME/.pi/agent/pi-notify-ntfy.mjs\" wait",
+        "cmd:\"$HOME/.pi/agent/pi-notify-bark.mjs\" wait"
       ]
     },
     "user-ready": {
       "delayMs": 0,
       "actions": [
         "bel",
-        "js:const cleanBody=(value)=>String(value??'').replace(/\\r\\n?/g,'\\n').replace(/[\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f]/g,'');const cleanHeader=(value)=>String(value??'').replace(/[\\r\\n\\u2028\\u2029]+/g,' ').replace(/[\\u0000-\\u001f\\u007f-\\u009f]/g,'');const warn=()=>{try{process.stderr.write('[pi-notify-config] Cannot launch ntfy\\n')}catch{}};const publish=(rawTitle,rawMessage,semanticTag)=>{const cwd=cleanHeader(notification.cwd);const sessionId=cleanHeader(notification.sessionId);const rawHostname=process.env.HOSTNAME??process.getBuiltinModule('os').hostname();const hostname=cleanHeader(rawHostname).trim()||'unknown-host';const hostnameTag=hostname.toLowerCase().replace(/[^a-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'')||'unknown-host';const title=cleanHeader(rawTitle)+' · '+hostname+' · '+cwd;const body=cleanBody(rawMessage)+'\\nsession id: '+sessionId;const tags=semanticTag+','+hostnameTag;try{notification.osc(title,body)}catch{}try{const child=process.getBuiltinModule('child_process').spawn('curl',['-fsS','--max-time','15','-o','/dev/null','-H','Title: '+title,'-H','Tags: '+tags,'--data-raw',body,'https://ntfy.sh/YOUR_PRIVATE_TOPIC'],{detached:true,stdio:'ignore',windowsHide:true,shell:false});child.once('error',warn);child.unref()}catch{warn()}};const kind=notification.values.STOP_KIND;if(kind==='AI_UNLOCK')publish('🙋 Pi Done',notification.values.REASON,'done');else if(kind==='EXHAUSTED')publish('🛑 Pi Continue stopped','Continue watchdog retry limit reached','retry-limit');else if(kind==='DECISION_FAILED')publish('⚠️ Pi Continue failed','Continue watchdog decision failed','decision-failed')"
-      ]
-    },
-    "agent-notify": {
-      "delayMs": 0,
-      "actions": [
-        "bel",
-        "js:const cleanBody=(value)=>String(value??'').replace(/\\r\\n?/g,'\\n').replace(/[\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f]/g,'');const cleanHeader=(value)=>String(value??'').replace(/[\\r\\n\\u2028\\u2029]+/g,' ').replace(/[\\u0000-\\u001f\\u007f-\\u009f]/g,'');const warn=()=>{try{process.stderr.write('[pi-notify-config] Cannot launch ntfy\\n')}catch{}};const publish=(rawTitle,rawMessage,semanticTag)=>{const cwd=cleanHeader(notification.cwd);const sessionId=cleanHeader(notification.sessionId);const rawHostname=process.env.HOSTNAME??process.getBuiltinModule('os').hostname();const hostname=cleanHeader(rawHostname).trim()||'unknown-host';const hostnameTag=hostname.toLowerCase().replace(/[^a-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'')||'unknown-host';const title=cleanHeader(rawTitle)+' · '+hostname+' · '+cwd;const body=cleanBody(rawMessage)+'\\nsession id: '+sessionId;const tags=semanticTag+','+hostnameTag;try{notification.osc(title,body)}catch{}try{const child=process.getBuiltinModule('child_process').spawn('curl',['-fsS','--max-time','15','-o','/dev/null','-H','Title: '+title,'-H','Tags: '+tags,'--data-raw',body,'https://ntfy.sh/YOUR_PRIVATE_TOPIC'],{detached:true,stdio:'ignore',windowsHide:true,shell:false});child.once('error',warn);child.unref()}catch{warn()}};if(typeof notification.values.TITLE==='string'&&typeof notification.values.CONTENT==='string')publish('🤖 '+notification.values.TITLE,notification.values.CONTENT,'agent')"
+        "cmd:\"$HOME/.pi/agent/pi-notify-ntfy.mjs\" user-ready",
+        "cmd:\"$HOME/.pi/agent/pi-notify-bark.mjs\" user-ready"
       ]
     }
   }
 }
 ```
 
-Why `delayMs` is `0`: the watchdog already waits for its authoritative terminal aggregate-idle boundary. The consumer should not add another arbitrary delay.
+For ntfy-only or Bark-only, remove other helper action. A helper failure is independent; pi-notify still attempts later actions. Do not use `$HOME` in direct-argv `shell:` tuples.
 
-## Safety and transport details
+## Verify without real network
 
-- This is trusted executable `js:` configuration. Keep the global file owner-only (`chmod 600`) and use project config only in trusted projects.
-- `cleanHeader` turns CR, LF, U+2028, and U+2029 into spaces and strips C0/C1 controls. Titles, hostname, cwd, and the session-ID suffix therefore stay single-line.
-- `cleanBody` preserves LF but strips other C0/C1 controls. Producer content may be multiline; the final session line remains structurally one line.
-- Curl is invoked directly with argv and `shell: false`; `--data-raw` preserves the multiline body without treating leading `@` as a filename.
-- OSC and ntfy are attempted independently. Launch failures are bounded and do not throw into Pi's hook lifecycle.
-- Unknown `STOP_KIND` and incomplete `agent-notify` values are silent.
-- The hostname tag is lowercase and allows only ASCII letters/digits, `.`, `_`, and `-`; unsafe runs become `-`.
+1. Parse config with `python3 -m json.tool`.
+2. Run fresh isolated Pi process with a local HTTP fixture bound to `127.0.0.1`; use only fixture `NTFY_URL` or `BARK_URL` and fixture key.
+3. Trigger durable continue, wait, AI unlock, exhaustion, and decision-failed events. Assert exact `PI_NOTIFY_REASON_TYPE`, `PI_NOTIFY_REASON`, and decimal `PI_NOTIFY_WAIT_SECONDS`; assert wait has no reason type.
+4. Verify titles, multiline/Unicode body, session suffix, and one request per configured backend.
+5. Verify manual unlock, abort, cancelled/stale/invalid/intermediate, and busy-child paths remain silent.
 
-### Multiline compatibility
-
-The same cleaned title/body strings are submitted to both transports; that is submission parity, not guaranteed visual parity:
-
-- ntfy carries the body LF through `--data-raw`.
-- Kitty OSC 99 uses UTF-8 Base64 (`e=1`) and preserves LF on the wire.
-- Windows toast, iTerm2 OSC 9, and generic OSC 777 receive LF best-effort; their final displayed layout is client-defined and may fold or rewrap it.
-
-Kitty protocol reference: <https://sw.kovidgoyal.net/kitty/desktop-notifications/>
-
-## Verify without sending a real notification
-
-1. Parse the config:
-
-   ```bash
-   python3 -m json.tool ~/.pi/agent/pi-notify.json >/dev/null
-   ```
-
-2. Put a fake `curl` earlier in `PATH` that records argv to a mode-600 temporary file and performs no network request.
-3. Start a fresh isolated Pi process/runtime in a known cwd and use a known session ID.
-4. Exercise `watchdog-continued`, `AI_UNLOCK`, `EXHAUSTED`, `DECISION_FAILED`, and `agent_notify`.
-5. Assert one OSC attempt and one ntfy attempt per valid event; manual unlock, abort, unknown stop kinds, and malformed values must remain silent.
-6. Verify title order is status → hostname → absolute cwd, body ends with one `session id:` line, and curl has two tags.
-7. Include hostile CR/LF/U+2028/U+2029 in title metadata and verify the `Title:` header remains one line; include LF in message content and verify the body retains it.
-
-Only after local capture passes should you optionally send one clearly marked live ntfy smoke.
-
-## Related
-
-- [pi-notify README](../README.md)
-- [Ask-user lifecycle example](./rpiv-ask-user-question.md)
-- [ntfy tags and emoji documentation](https://docs.ntfy.sh/publish/#tags-emojis)
+Related: [Reflect](./pi-reflect-watchdog.md), [ntfy helper](./pi-notify-ntfy.md), [Bark helper](./pi-notify-bark.md), [README](../README.md).

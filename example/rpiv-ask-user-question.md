@@ -15,7 +15,7 @@ Pi tool_execution_start
         v
 pi-notify
         +-- terminal OSC / Windows toast
-        +-- detached Node helper POST to ntfy
+        +-- detached Node helper POST to selected backend (ntfy or Bark)
 ```
 
 pi-notify observes the tool start; it does not block, rewrite, or answer the questionnaire. Other tools do not match this binding. This recipe publishes only each question's `question` text; options and answers are never published.
@@ -33,7 +33,7 @@ For multiple questions:
 Tags:  input-required,<hostname-tag>
 ```
 
-Hostname resolution prefers `process.env.HOSTNAME`, then `os.hostname()` when the environment variable is undefined. The ntfy request contains two tags: the semantic `input-required` tag and a lowercase, comma-safe hostname tag.
+Hostname resolution prefers `process.env.HOSTNAME`, then `os.hostname()` when the environment variable is undefined. The ntfy request contains two tags: semantic `input-required` and lowercase, comma-safe hostname. Bark uses same title/body with `group: pi-notify`.
 
 OSC and ntfy receive the same cleaned logical title/body strings. Kitty and ntfy preserve the LF before `session id:` in transport; Windows toast, iTerm2 OSC 9, and OSC 777 display multiline text best-effort.
 
@@ -48,19 +48,20 @@ Restart Pi after installation or use Pi's supported reload flow.
 
 ## Configuration
 
-The inline `js:` below reads the retained causal event's `event.args.questions[].question`, formats one question directly or multiple questions as numbered lines, then sends the body to OSC and a detached ntfy helper. It passes `notification.sessionId`, cwd, and hostname explicitly to the child; options and answers never leave Pi.
+The inline `js:` below reads retained causal event `event.args.questions[].question`, formats one question directly or multiple questions as numbered lines, then sends body to OSC and detached backend helper. It passes `notification.sessionId`, cwd, and hostname explicitly to child; options and answers never leave Pi. Use ntfy or Bark helper, or invoke both through separate actions in a trusted project config.
 
 Write the following nested config to `$PI_CODING_AGENT_DIR/pi-notify.json` (normally `~/.pi/agent/pi-notify.json`). If the file already contains `hooks`, merge this `events` object instead of replacing unrelated bindings.
 
-Install the companion helper, replace `YOUR_PRIVATE_TOPIC` in the copied file, and keep it owner-only:
+Install one or both companion helpers and keep each owner-only. Configure backend credentials in user-owned environment; never commit populated values:
 
 ```bash
 agent_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 mkdir -p "$agent_dir"
 install -m 700 example/pi-notify-ntfy.mjs "$agent_dir/pi-notify-ntfy.mjs"
+install -m 700 example/pi-notify-bark.mjs "$agent_dir/pi-notify-bark.mjs"
 ```
 
-The example action resolves `$PI_CODING_AGENT_DIR` (or `~/.pi/agent`) at runtime and starts this helper through `node` resolved from `PATH`; it does not hardcode an executable path. Each child receives its question body through its own stdin pipe, so no temporary file or shared mutable state exists and overlapping notifications stay isolated. Treat a real ntfy topic URL like a credential.
+The example action resolves `$PI_CODING_AGENT_DIR` (or `~/.pi/agent`) at runtime and starts helper through `node` resolved from `PATH`; it does not hardcode executable path. Each child receives question body through own stdin pipe, so no temporary file or shared mutable state exists and overlapping notifications stay isolated. For Bark, replace helper filename and set `BARK_URL` + `BARK_DEVICE_KEY`; for both, add second `cmd:` action. Treat backend values like credentials.
 
 ```json
 {
@@ -113,7 +114,7 @@ Kitty protocol reference: <https://sw.kovidgoyal.net/kitty/desktop-notifications
    python3 -m json.tool ~/.pi/agent/pi-notify.json >/dev/null
    ```
 
-2. Point the copied helper's `NTFY_URL` at a local HTTP test endpoint, or replace its `fetch` call in a temporary copy; verify the request body without contacting a public service.
+2. Point the copied ntfy or Bark helper at a local loopback HTTP test endpoint (`127.0.0.1`), or replace its `fetch` call in a temporary copy; verify request body without contacting a public service.
 3. Start a fresh isolated Pi runtime in a known cwd/session and cause the model to call `ask_user_question`.
 4. Assert exactly one OSC attempt and one helper attempt when the tool starts. Answering or dismissing the question must not create another notification from this binding.
 5. Check the title order is `❓ Pi Question · hostname · cwd`.
@@ -128,4 +129,6 @@ Kitty protocol reference: <https://sw.kovidgoyal.net/kitty/desktop-notifications
 
 - [pi-notify README](../README.md)
 - [Continue-watchdog semantic-hook example](./pi-continue-watchdog.md)
+- [ntfy backend helper](./pi-notify-ntfy.md)
+- [Bark backend helper](./pi-notify-bark.md)
 - [ntfy tags documentation](https://docs.ntfy.sh/publish/#tags-emojis)

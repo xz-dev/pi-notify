@@ -30,15 +30,18 @@ Available producer templates are `{{TITLE}}` and `{{CONTENT}}`; normal pi-notify
 
 Use `js:` only when the action is genuinely conditional or cannot be represented by templates and built-in actions.
 
-## Optional ntfy companion
+## Optional backend companions
 
-For a remote ntfy notification, copy [`pi-notify-ntfy.mjs`](./pi-notify-ntfy.mjs) to a private path outside the package, replace `YOUR_PRIVATE_TOPIC`, and make it owner-executable:
+For one or both backend notifications, copy the standalone helpers to a private path outside package and keep them owner-only. Configure `NTFY_URL` as complete topic URL, or `BARK_URL` as `/push` plus `BARK_DEVICE_KEY`, in user-owned environment. Never commit populated credentials.
 
 ```bash
-install -m 700 example/pi-notify-ntfy.mjs ~/.pi/agent/pi-notify-ntfy.mjs
+agent_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+mkdir -p "$agent_dir"
+install -m 700 example/pi-notify-ntfy.mjs "$agent_dir/pi-notify-ntfy.mjs"
+install -m 700 example/pi-notify-bark.mjs "$agent_dir/pi-notify-bark.mjs"
 ```
 
-Then append a portable `cmd:` action. The host shell expands `$HOME`, so the same config works under different user home directories:
+Then append separate portable `cmd:` actions. The host shell expands `$HOME`, so same config works under different user home directories. Use one action for ntfy-only, one for Bark-only, or both shown below:
 
 ```json
 {
@@ -48,7 +51,8 @@ Then append a portable `cmd:` action. The host shell expands `$HOME`, so the sam
       "actions": [
         "bel",
         "osc:🤖 {{TITLE}} · {{HOSTNAME}} · {{CWD}}|{{CONTENT}}\nsession id: {{SESSION_ID}}",
-        "cmd:\"$HOME/.pi/agent/pi-notify-ntfy.mjs\" agent"
+        "cmd:\"$HOME/.pi/agent/pi-notify-ntfy.mjs\" agent",
+        "cmd:\"$HOME/.pi/agent/pi-notify-bark.mjs\" agent"
       ]
     }
   }
@@ -59,7 +63,7 @@ Do not put `$HOME` in a structured `shell:` tuple: tuples use direct argv execut
 
 The tuple is direct argv execution (`shell: false`), not a shell command string. The helper receives notification context through `PI_NOTIFY_*`; it does not need embedded JavaScript in JSON.
 
-Treat a real ntfy topic URL as a credential. Keep the private helper owner-only and never commit it with the topic filled in.
+Treat backend URLs and keys as credentials. Keep helper files owner-only and never commit populated values. See standalone [ntfy](./pi-notify-ntfy.md) and [Bark](./pi-notify-bark.md) guides for request contracts and loopback verification.
 
 ## AI-facing behavior
 
@@ -76,3 +80,6 @@ This confirms synchronous publication to Pi's neutral bus, not delivery completi
 - [pi-notify README](../README.md)
 - [Ask-user lifecycle example](./rpiv-ask-user-question.md)
 - [Continue-watchdog semantic-hook example](./pi-continue-watchdog.md)
+- [Reflect-watchdog semantic-hook example](./pi-reflect-watchdog.md)
+- [ntfy backend helper](./pi-notify-ntfy.md)
+- [Bark backend helper](./pi-notify-bark.md)
