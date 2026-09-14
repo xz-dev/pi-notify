@@ -113,6 +113,10 @@ if (mode === "question") {
       title = `🚧 Pi Blocked · ${hostname} · ${cwd}`;
       tag = "blocked";
     }
+  } else if (stopKind === "ERROR_UNLOCK") {
+    title = `❌ Pi Continue error · ${hostname} · ${cwd}`;
+    message = "Continue watchdog unlocked · run ended in error (automatic unlock)";
+    tag = "error-unlock";
   } else if (stopKind === "EXHAUSTED") {
     title = `🛑 Pi Continue stopped · ${hostname} · ${cwd}`;
     message = "Continue watchdog retry limit reached";

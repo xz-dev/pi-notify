@@ -101,6 +101,9 @@ if (mode === "question") {
         : reasonType === "WAIT_USER"
           ? `🙋 Pi Wait · ${hostname} · ${cwd}`
           : `🚧 Pi Blocked · ${hostname} · ${cwd}`;
+  } else if (stopKind === "ERROR_UNLOCK") {
+    title = `❌ Pi Continue error · ${hostname} · ${cwd}`;
+    message = "Continue watchdog unlocked · run ended in error (automatic unlock)";
   } else if (stopKind === "EXHAUSTED") {
     title = `🛑 Pi Continue stopped · ${hostname} · ${cwd}`;
     message = "Continue watchdog retry limit reached";

@@ -10,7 +10,7 @@ Channel is exactly `pi:semantic-hook:v1`. Delivery is best-effort to current lis
 | --- | --- | --- |
 | `watchdog-continued` | `REASON_TYPE`, `REASON` | Durable accepted continue; type is normally `WORK_REMAINS` or `VERIFYING`. |
 | `watchdog-waiting` | `REASON`, decimal-string `WAIT_SECONDS` | Durable passive wait. It has **no `REASON_TYPE`** and starts no continuation turn. |
-| `user-ready` | `STOP_KIND` | Automatic terminal state. `AI_UNLOCK` also has producer `REASON_TYPE` + `REASON`; `EXHAUSTED` and `DECISION_FAILED` have no extra fields. |
+| `user-ready` | `STOP_KIND` | Automatic terminal state. `AI_UNLOCK` also has producer `REASON_TYPE` + `REASON`; `ERROR_UNLOCK`, `EXHAUSTED`, and `DECISION_FAILED` have no extra fields. |
 
 Example wait envelope:
 
@@ -22,11 +22,11 @@ Example wait envelope:
 }
 ```
 
-`user-ready` terminal kinds map to `AI_UNLOCK` (typed producer reason), `EXHAUSTED` (retry budget exhausted), and `DECISION_FAILED` (three invalid decisions). Manual unlock, main-agent abort, ordinary unlocked idle, intermediate/cancelled/stale/invalid states, and a still-busy child publish no notification. pi-notify must not infer these silent states.
+`user-ready` terminal kinds map to `AI_UNLOCK` (typed producer reason), `ERROR_UNLOCK` (terminal-error automatic unlock), `EXHAUSTED` (retry budget exhausted), and `DECISION_FAILED` (three invalid decisions). Manual unlock, main-agent abort, ordinary unlocked idle, intermediate/cancelled/stale/invalid states, and a still-busy child publish no notification. pi-notify must not infer these silent states.
 
 ## Notification presentation
 
-Helpers append `session id: <SESSION_ID>` to body. Continue uses `▶️ Pi Continue` and `<REASON_TYPE> · <REASON>`. Wait uses `⏳ Pi Waiting` and `<WAIT_SECONDS>s · <REASON>`. Automatic user-ready uses producer-owned reason mapping: `🙋 Pi Done` (`JOB_DONE`), `🙋 Pi Wait` (`WAIT_USER`), `🚧 Pi Blocked` (`JOB_BLOCKED`), fallback `🔔 Pi Ready`, `🛑 Pi Continue stopped`, or `⚠️ Pi Continue failed`.
+Helpers append `session id: <SESSION_ID>` to body. Continue uses `▶️ Pi Continue` and `<REASON_TYPE> · <REASON>`. Wait uses `⏳ Pi Waiting` and `<WAIT_SECONDS>s · <REASON>`. Automatic user-ready uses producer-owned reason mapping: `🙋 Pi Done` (`JOB_DONE`), `🙋 Pi Wait` (`WAIT_USER`), `🚧 Pi Blocked` (`JOB_BLOCKED`), fallback `🔔 Pi Ready`, `❌ Pi Continue error` (`ERROR_UNLOCK`), `🛑 Pi Continue stopped` (`EXHAUSTED`), or `⚠️ Pi Continue failed` (`DECISION_FAILED`).
 
 ## Install
 
@@ -87,7 +87,7 @@ For ntfy-only or Bark-only, remove other helper action. A helper failure is inde
 
 1. Parse config with `python3 -m json.tool`.
 2. Run fresh isolated Pi process with a local HTTP fixture bound to `127.0.0.1`; use only fixture `NTFY_URL` or `BARK_URL` and fixture key.
-3. Trigger durable continue, wait, AI unlock, exhaustion, and decision-failed events. Assert exact `PI_NOTIFY_REASON_TYPE`, `PI_NOTIFY_REASON`, and decimal `PI_NOTIFY_WAIT_SECONDS`; assert wait has no reason type.
+3. Trigger durable continue, wait, AI unlock, terminal-error auto-unlock, exhaustion, and decision-failed events. Assert exact `PI_NOTIFY_REASON_TYPE`, `PI_NOTIFY_REASON`, and decimal `PI_NOTIFY_WAIT_SECONDS`; assert wait and `ERROR_UNLOCK` have no reason type.
 4. Verify titles, multiline/Unicode body, session suffix, and one request per configured backend.
 5. Verify manual unlock, abort, cancelled/stale/invalid/intermediate, and busy-child paths remain silent.
 

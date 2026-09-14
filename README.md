@@ -136,7 +136,7 @@ Nested JSON only. Old flat top-level event keys and `pi_notify:agent_notify` are
       "delayMs": 0,
       "actions": [
         "bel",
-        "js:const kind = notification.values.STOP_KIND; if (kind === 'AI_UNLOCK') notification.osc('Pi', notification.values.REASON); else if (kind === 'EXHAUSTED') notification.osc('Pi', 'Continue watchdog exhausted'); else if (kind === 'DECISION_FAILED') notification.osc('Pi', 'Continue watchdog decision failed');"
+        "js:const kind = notification.values.STOP_KIND; if (kind === 'AI_UNLOCK') notification.osc('Pi', notification.values.REASON); else if (kind === 'ERROR_UNLOCK') notification.osc('Pi', 'Continue watchdog unlocked · run ended in error (automatic unlock)'); else if (kind === 'EXHAUSTED') notification.osc('Pi', 'Continue watchdog exhausted'); else if (kind === 'DECISION_FAILED') notification.osc('Pi', 'Continue watchdog decision failed');"
       ]
     },
     "build-finished": {

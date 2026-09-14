@@ -41,7 +41,7 @@ Both public helpers support `question`, `agent`, `continue`, `wait`, `reflect`, 
 | `continue` | `REASON_TYPE`, `REASON` | `▶️ Pi Continue`; `TYPE · reason` |
 | `wait` | `REASON`, positive decimal `WAIT_SECONDS` | `⏳ Pi Waiting`; `seconds s · reason` |
 | `reflect` | `REFLECTION_TYPE`, `REASON`, `NEXT_STEP` | fixed clear/route-correction reflection title |
-| `user-ready` | `STOP_KIND`; AI unlock also `REASON_TYPE`, `REASON` | done/wait/blocked/ready, exhausted, or decision-failed |
+| `user-ready` | `STOP_KIND`; AI unlock also `REASON_TYPE`, `REASON` | done/wait/blocked/ready, terminal-error, exhausted, or decision-failed |
 
 Question text is read from that invocation's stdin, never `PI_NOTIFY_QUESTION_BODY` or a temporary file. Multiline and Unicode bodies are preserved; metadata is cleaned for safe single-line headers. Missing fields, unsupported modes, invalid wait values, and incomplete presentations exit silently without a request. Requests use a finite 15-second timeout.
 

@@ -234,6 +234,7 @@ test("ntfy companion maps automatic user-ready outcomes without conflating reaso
       ["AI_UNLOCK", "JOB_DONE", "✅ Pi Done · workstation · /work/project", "done", "All work is complete."],
       ["AI_UNLOCK", "WAIT_USER", "🙋 Pi Wait · workstation · /work/project", "wait-user", "Please choose the next step."],
       ["AI_UNLOCK", "JOB_BLOCKED", "🚧 Pi Blocked · workstation · /work/project", "blocked", "The required service is unavailable."],
+      ["ERROR_UNLOCK", "", "❌ Pi Continue error · workstation · /work/project", "error-unlock", "Continue watchdog unlocked · run ended in error (automatic unlock)"],
       ["EXHAUSTED", "", "🛑 Pi Continue stopped · workstation · /work/project", "retry-limit", "Continue watchdog retry limit reached"],
       ["DECISION_FAILED", "", "⚠️ Pi Continue failed · workstation · /work/project", "decision-failed", "Continue watchdog decision failed"],
     ] as const;

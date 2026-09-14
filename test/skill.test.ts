@@ -32,6 +32,7 @@ test("adapt-pi-notify skill is packaged with the accepted neutral-hook contract"
   assert.match(skill, /"STOP_KIND": "AI_UNLOCK"/);
   assert.match(skill, /"STOP_KIND": "EXHAUSTED"/);
   assert.match(skill, /"STOP_KIND": "DECISION_FAILED"/);
+  assert.match(skill, /"STOP_KIND": "ERROR_UNLOCK"/);
   assert.match(skill, /Human unlock and user\/manual abort are intentionally silent/);
 
   assert.match(skill, /delayMs/);

@@ -117,7 +117,19 @@ or:
 }
 ```
 
-AI decision unlock uses the producer's existing validated reason. Human unlock and user/manual abort are intentionally silent. Continue also publishes `watchdog-continued` with `REASON_TYPE`/`REASON` and `watchdog-waiting` with `REASON`/decimal-string `WAIT_SECONDS` (no `REASON_TYPE`). Intermediate, cancelled, stale, invalid, and human-owned states remain silent; consumer must not infer them.
+or:
+
+```json
+{
+  "version": 1,
+  "name": "user-ready",
+  "values": {
+    "STOP_KIND": "ERROR_UNLOCK"
+  }
+}
+```
+
+AI decision unlock uses the producer's existing validated reason. Human unlock and user/manual abort are intentionally silent. `ERROR_UNLOCK` is the terminal-error automatic unlock (`Continue watchdog unlocked · run ended in error (automatic unlock)`); consumers map it to a red-cross title such as `❌ Pi Continue error`. Continue also publishes `watchdog-continued` with `REASON_TYPE`/`REASON` and `watchdog-waiting` with `REASON`/decimal-string `WAIT_SECONDS` (no `REASON_TYPE`). Intermediate, cancelled, stale, invalid, and human-owned states remain silent; consumer must not infer them.
 
 `pi-reflect-watchdog` independently publishes `reflection-completed` with `REFLECTION_TYPE`, `REASON`, and `NEXT_STEP`; current types are `NO_ISSUE` and `ROUTE_CORRECTION`. Producer clips hook fields over 4096 UTF-16 code units while durable report keeps full values, and publishes only after durable completion.
 
