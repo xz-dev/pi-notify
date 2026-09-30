@@ -8,25 +8,23 @@ Channel is exactly `pi:semantic-hook:v1`. Delivery is best-effort to current lis
 
 | Hook | Producer values | Meaning |
 | --- | --- | --- |
-| `watchdog-continued` | `REASON_TYPE`, `REASON` | Durable accepted continue; type is normally `WORK_REMAINS` or `VERIFYING`. |
-| `watchdog-waiting` | `REASON`, decimal-string `WAIT_SECONDS` | Durable passive wait. It has **no `REASON_TYPE`** and starts no continuation turn. |
-| `user-ready` | `STOP_KIND` | Automatic terminal state. `AI_UNLOCK` also has producer `REASON_TYPE` + `REASON`; `ERROR_UNLOCK`, `EXHAUSTED`, and `DECISION_FAILED` have no extra fields. |
+| `watchdog-continued` | none | Durable accepted automatic continuation. It has **no values**. |
+| `user-ready` | `STOP_KIND` | Automatic terminal state. `AI_UNLOCK` also has producer `REASON_TYPE` + `REASON`; `ERROR_UNLOCK` and `EXHAUSTED` have no extra fields. |
 
-Example wait envelope:
+Example continue envelope:
 
 ```json
 {
   "version": 1,
-  "name": "watchdog-waiting",
-  "values": { "REASON": "Waiting for CI.", "WAIT_SECONDS": "300" }
+  "name": "watchdog-continued"
 }
 ```
 
-`user-ready` terminal kinds map to `AI_UNLOCK` (typed producer reason), `ERROR_UNLOCK` (terminal-error automatic unlock), `EXHAUSTED` (retry budget exhausted), and `DECISION_FAILED` (three invalid decisions). Manual unlock, main-agent abort, ordinary unlocked idle, intermediate/cancelled/stale/invalid states, and a still-busy child publish no notification. pi-notify must not infer these silent states.
+`user-ready` terminal kinds map to `AI_UNLOCK` (typed producer reason, emitted when the model calls the `unlock_continue_watchdog` tool), `ERROR_UNLOCK` (terminal-error automatic unlock), and `EXHAUSTED` (retry budget exhausted). Manual unlock, main-agent abort, ordinary unlocked idle, intermediate/cancelled/stale/invalid states, and a still-busy child publish no notification. pi-notify must not infer these silent states.
 
 ## Notification presentation
 
-Helpers append `session id: <SESSION_ID>` to body. Continue uses `▶️ Pi Continue` and `<REASON_TYPE> · <REASON>`. Wait uses `⏳ Pi Waiting` and `<WAIT_SECONDS>s · <REASON>`. Automatic user-ready uses producer-owned reason mapping: `🙋 Pi Done` (`JOB_DONE`), `🙋 Pi Wait` (`WAIT_USER`), `🚧 Pi Blocked` (`JOB_BLOCKED`), fallback `🔔 Pi Ready`, `❌ Pi Continue error` (`ERROR_UNLOCK`), `🛑 Pi Continue stopped` (`EXHAUSTED`), or `⚠️ Pi Continue failed` (`DECISION_FAILED`).
+Helpers append `session id: <SESSION_ID>` to body. Continue uses `▶️ Pi Continue` and the fixed message `Continue watchdog continued`. Automatic user-ready uses producer-owned reason mapping: `✅ Pi Done` (`JOB_DONE`), `🙋 Pi Wait` (`WAIT_USER`), `🚧 Pi Blocked` (`JOB_BLOCKED`), `❌ Pi Continue error` (`ERROR_UNLOCK`), or `🛑 Pi Continue stopped` (`EXHAUSTED`).
 
 ## Install
 
@@ -61,14 +59,6 @@ Use separate `cmd:` actions. `$HOME` is expanded by platform shell; helpers rece
         "cmd:\"$HOME/.pi/agent/pi-notify-bark.mjs\" continue"
       ]
     },
-    "watchdog-waiting": {
-      "delayMs": 0,
-      "actions": [
-        "bel",
-        "cmd:\"$HOME/.pi/agent/pi-notify-ntfy.mjs\" wait",
-        "cmd:\"$HOME/.pi/agent/pi-notify-bark.mjs\" wait"
-      ]
-    },
     "user-ready": {
       "delayMs": 0,
       "actions": [
@@ -87,7 +77,7 @@ For ntfy-only or Bark-only, remove other helper action. A helper failure is inde
 
 1. Parse config with `python3 -m json.tool`.
 2. Run fresh isolated Pi process with a local HTTP fixture bound to `127.0.0.1`; use only fixture `NTFY_URL` or `BARK_URL` and fixture key.
-3. Trigger durable continue, wait, AI unlock, terminal-error auto-unlock, exhaustion, and decision-failed events. Assert exact `PI_NOTIFY_REASON_TYPE`, `PI_NOTIFY_REASON`, and decimal `PI_NOTIFY_WAIT_SECONDS`; assert wait and `ERROR_UNLOCK` have no reason type.
+3. Trigger durable continue, AI unlock, terminal-error auto-unlock, and exhaustion events. Assert `watchdog-continued` carries no `PI_NOTIFY_REASON_TYPE`/`PI_NOTIFY_REASON`; assert `AI_UNLOCK` carries both; assert `ERROR_UNLOCK` and `EXHAUSTED` have no reason type.
 4. Verify titles, multiline/Unicode body, session suffix, and one request per configured backend.
 5. Verify manual unlock, abort, cancelled/stale/invalid/intermediate, and busy-child paths remain silent.
 

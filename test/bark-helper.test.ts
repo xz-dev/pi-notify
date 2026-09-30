@@ -146,11 +146,7 @@ test("Bark companion supports stdin questions and lifecycle presentation modes",
       },
       {
         args: ["continue"],
-        values: { PI_NOTIFY_REASON_TYPE: "WORK_REMAINS", PI_NOTIFY_REASON: "Keep going", PI_NOTIFY_SESSION_ID: "c" },
-      },
-      {
-        args: ["wait"],
-        values: { PI_NOTIFY_WAIT_SECONDS: "45", PI_NOTIFY_REASON: "Waiting for CI", PI_NOTIFY_SESSION_ID: "w" },
+        values: { PI_NOTIFY_SESSION_ID: "c" },
       },
       {
         args: ["reflect"],
@@ -191,10 +187,10 @@ test("Bark companion supports stdin questions and lifecycle presentation modes",
     );
     assert.equal(parseRequest(fixture.requests[0]!).body, "第一问？\n第二问？\nsession id: q");
     assert.equal(parseRequest(fixture.requests[1]!).title, "▶️ Pi Continue · host · /work");
-    assert.equal(parseRequest(fixture.requests[2]!).body, "45s · Waiting for CI\nsession id: w");
-    assert.equal(parseRequest(fixture.requests[3]!).title, "👀 Pi Reflection clear · host · /work");
-    assert.equal(parseRequest(fixture.requests[4]!).title, "🧭 Pi Route correction · host · /work");
-    assert.equal(parseRequest(fixture.requests[5]!).title, "🙋 Pi Wait · host · /work");
+    assert.equal(parseRequest(fixture.requests[1]!).body, "Continue watchdog continued\nsession id: c");
+    assert.equal(parseRequest(fixture.requests[2]!).title, "👀 Pi Reflection clear · host · /work");
+    assert.equal(parseRequest(fixture.requests[3]!).title, "🧭 Pi Route correction · host · /work");
+    assert.equal(parseRequest(fixture.requests[4]!).title, "🙋 Pi Wait · host · /work");
   } finally {
     await fixture.close();
   }
@@ -281,8 +277,6 @@ test("Bark companion stays silent for incomplete or invalid presentations", asyn
   try {
     const cases: Array<[string[], Record<string, string>, string?]> = [
       [["agent"], { PI_NOTIFY_TITLE: "title" }],
-      [["wait"], { PI_NOTIFY_REASON: "reason", PI_NOTIFY_WAIT_SECONDS: "0" }],
-      [["wait"], { PI_NOTIFY_REASON: "reason", PI_NOTIFY_WAIT_SECONDS: "1.5" }],
       [["reflect"], { PI_NOTIFY_REFLECTION_TYPE: "NO_ISSUE", PI_NOTIFY_REASON: "reason" }],
       [["user-ready"], { PI_NOTIFY_STOP_KIND: "NOT_AUTOMATIC" }],
       [["question"], {}, ""],
@@ -291,6 +285,33 @@ test("Bark companion stays silent for incomplete or invalid presentations", asyn
       const result = await runHelper(args, isolatedEnv(fixture.endpoint, values), input);
       assert.equal(result.status, 0, result.stderr);
     }
+    assert.equal(fixture.requests.length, 0);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("Bark companion exits with usage for removed wait mode and stays silent for removed stop kind", async () => {
+  const fixture = await startServer();
+  try {
+    // Removed producer outputs: wait mode is unsupported (usage exit 2),
+    // DECISION_FAILED is an unknown stop kind (silent exit 0).
+    const waitResult = await runHelper(
+      ["wait"],
+      isolatedEnv(fixture.endpoint, {
+        PI_NOTIFY_REASON: "reason",
+        PI_NOTIFY_WAIT_SECONDS: "60",
+        PI_NOTIFY_SESSION_ID: "w",
+      }),
+    );
+    assert.equal(waitResult.status, 2);
+    assert.match(waitResult.stderr, /^Usage: pi-notify-bark\.mjs /m);
+
+    const failedResult = await runHelper(
+      ["user-ready"],
+      isolatedEnv(fixture.endpoint, { PI_NOTIFY_STOP_KIND: "DECISION_FAILED", PI_NOTIFY_SESSION_ID: "f" }),
+    );
+    assert.equal(failedResult.status, 0, failedResult.stderr);
     assert.equal(fixture.requests.length, 0);
   } finally {
     await fixture.close();

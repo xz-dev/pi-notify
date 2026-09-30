@@ -64,18 +64,8 @@ if (mode === "question") {
   if (!producerTitle || !message.trim()) process.exit(0);
   title = `🤖 ${producerTitle} · ${hostname} · ${cwd}`;
 } else if (mode === "continue") {
-  const reasonType = cleanHeader(env.PI_NOTIFY_REASON_TYPE).trim().toUpperCase();
-  const reason = cleanBody(env.PI_NOTIFY_REASON).trim();
-  if (!reasonType || !reason) process.exit(0);
   title = `▶️ Pi Continue · ${hostname} · ${cwd}`;
-  message = `${reasonType} · ${reason}`;
-} else if (mode === "wait") {
-  const waitSeconds = cleanHeader(env.PI_NOTIFY_WAIT_SECONDS).trim();
-  const reason = cleanBody(env.PI_NOTIFY_REASON).trim();
-  const waitValue = Number(waitSeconds);
-  if (!/^[1-9]\d*$/.test(waitSeconds) || !Number.isSafeInteger(waitValue) || waitValue > 1800 || !reason) process.exit(0);
-  title = `⏳ Pi Waiting · ${hostname} · ${cwd}`;
-  message = `${waitSeconds}s · ${reason}`;
+  message = "Continue watchdog continued";
 } else if (mode === "reflect") {
   const reflectionType = cleanHeader(env.PI_NOTIFY_REFLECTION_TYPE).trim().toUpperCase();
   const reason = cleanBody(env.PI_NOTIFY_REASON).trim();
@@ -107,14 +97,11 @@ if (mode === "question") {
   } else if (stopKind === "EXHAUSTED") {
     title = `🛑 Pi Continue stopped · ${hostname} · ${cwd}`;
     message = "Continue watchdog retry limit reached";
-  } else if (stopKind === "DECISION_FAILED") {
-    title = `⚠️ Pi Continue failed · ${hostname} · ${cwd}`;
-    message = "Continue watchdog decision failed";
   } else {
     process.exit(0);
   }
 } else {
-  process.stderr.write("Usage: pi-notify-bark.mjs question|agent|continue|wait|reflect|user-ready\n");
+  process.stderr.write("Usage: pi-notify-bark.mjs question|agent|continue|reflect|user-ready\n");
   process.exit(2);
 }
 

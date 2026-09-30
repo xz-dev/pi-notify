@@ -31,8 +31,11 @@ test("adapt-pi-notify skill is packaged with the accepted neutral-hook contract"
 
   assert.match(skill, /"STOP_KIND": "AI_UNLOCK"/);
   assert.match(skill, /"STOP_KIND": "EXHAUSTED"/);
-  assert.match(skill, /"STOP_KIND": "DECISION_FAILED"/);
   assert.match(skill, /"STOP_KIND": "ERROR_UNLOCK"/);
+  // Removed producer outputs must not linger in the producer contract.
+  assert.doesNotMatch(skill, /DECISION_FAILED/);
+  assert.doesNotMatch(skill, /watchdog-waiting/);
+  assert.doesNotMatch(skill, /WAIT_SECONDS/);
   assert.match(skill, /Human unlock and user\/manual abort are intentionally silent/);
 
   assert.match(skill, /delayMs/);
@@ -45,8 +48,6 @@ test("adapt-pi-notify skill is packaged with the accepted neutral-hook contract"
   assert.match(skill, /notification\.osc\("Pi", notification\.values\.REASON\)/);
   assert.match(skill, /notification\.bel\(\)/);
   assert.match(skill, /watchdog-continued/);
-  assert.match(skill, /watchdog-waiting/);
-  assert.match(skill, /WAIT_SECONDS/);
   assert.match(skill, /reflection-completed/);
   assert.match(skill, /REFLECTION_TYPE/);
   assert.match(skill, /NEXT_STEP/);
@@ -54,7 +55,7 @@ test("adapt-pi-notify skill is packaged with the accepted neutral-hook contract"
   assert.match(skill, /ROUTE_CORRECTION/);
   assert.match(skill, /pi-notify-ntfy\.md/);
   assert.match(skill, /pi-notify-bark\.md/);
-  assert.match(skill, /question.*agent.*continue.*wait.*reflect.*user-ready/s);
+  assert.match(skill, /question.*agent.*continue.*reflect.*user-ready/s);
   assert.match(skill, /NTFY_URL/);
   assert.match(skill, /BARK_URL/);
   assert.match(skill, /BARK_DEVICE_KEY/);

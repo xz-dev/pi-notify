@@ -32,18 +32,17 @@ Do not use `$HOME` in a `shell:` tuple: tuples are direct argv, not shell expans
 
 ## Modes and inputs
 
-Both public helpers support `question`, `agent`, `continue`, `wait`, `reflect`, and `user-ready`.
+Both public helpers support `question`, `agent`, `continue`, `reflect`, and `user-ready`.
 
 | Mode | Required `PI_NOTIFY_*` fields | Presentation |
 | --- | --- | --- |
 | `question` | complete UTF-8 stdin | `❓ Pi Question · HOSTNAME · CWD`; stdin body |
 | `agent` | `TITLE`, `CONTENT` | `🤖 TITLE · HOSTNAME · CWD` |
-| `continue` | `REASON_TYPE`, `REASON` | `▶️ Pi Continue`; `TYPE · reason` |
-| `wait` | `REASON`, positive decimal `WAIT_SECONDS` | `⏳ Pi Waiting`; `seconds s · reason` |
+| `continue` | none | `▶️ Pi Continue`; fixed `Continue watchdog continued` message |
 | `reflect` | `REFLECTION_TYPE`, `REASON`, `NEXT_STEP` | fixed clear/route-correction reflection title |
-| `user-ready` | `STOP_KIND`; AI unlock also `REASON_TYPE`, `REASON` | done/wait/blocked/ready, terminal-error, exhausted, or decision-failed |
+| `user-ready` | `STOP_KIND`; AI unlock also `REASON_TYPE`, `REASON` | done/wait/blocked, terminal-error, or exhausted |
 
-Question text is read from that invocation's stdin, never `PI_NOTIFY_QUESTION_BODY` or a temporary file. Multiline and Unicode bodies are preserved; metadata is cleaned for safe single-line headers. Missing fields, unsupported modes, invalid wait values, and incomplete presentations exit silently without a request. Requests use a finite 15-second timeout.
+Question text is read from that invocation's stdin, never `PI_NOTIFY_QUESTION_BODY` or a temporary file. Multiline and Unicode bodies are preserved; metadata is cleaned for safe single-line headers. Missing fields, unsupported modes, and incomplete presentations exit silently without a request. Unsupported modes exit with usage status 2. Requests use a finite 15-second timeout.
 
 ## Request and failures
 

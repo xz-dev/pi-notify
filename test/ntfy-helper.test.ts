@@ -132,44 +132,26 @@ test("ntfy companion publishes multilingual title and body as UTF-8 JSON", async
   }
 });
 
-test("ntfy companion publishes continue and wait notifications with their distinct fields", async () => {
+test("ntfy companion publishes continue notification with its fixed message", async () => {
   const fixture = await startServer();
   try {
     const continueResult = await runHelper(
       ["continue"],
       isolatedEnv(fixture.endpoint, {
-        PI_NOTIFY_REASON_TYPE: "verifying",
-        PI_NOTIFY_REASON: "Tests still need to run.",
         PI_NOTIFY_HOSTNAME: "workstation",
         PI_NOTIFY_CWD: "/work/project",
         PI_NOTIFY_SESSION_ID: "session-continue",
-      }),
-    );
-    const waitResult = await runHelper(
-      ["wait"],
-      isolatedEnv(fixture.endpoint, {
-        PI_NOTIFY_REASON: "Waiting for CI — 请稍候",
-        PI_NOTIFY_WAIT_SECONDS: "300",
-        PI_NOTIFY_HOSTNAME: "workstation",
-        PI_NOTIFY_CWD: "/work/project",
-        PI_NOTIFY_SESSION_ID: "session-wait",
         PI_NOTIFY_REASON_TYPE: "must not be used",
+        PI_NOTIFY_REASON: "must not be used",
       }),
     );
     assert.equal(continueResult.status, 0, continueResult.stderr);
-    assert.equal(waitResult.status, 0, waitResult.stderr);
     assert.deepEqual(fixture.requests.map(parseRequest), [
       {
         topic: "test-topic",
         title: "▶️ Pi Continue · workstation · /work/project",
-        message: "VERIFYING · Tests still need to run.\nsession id: session-continue",
+        message: "Continue watchdog continued\nsession id: session-continue",
         tags: ["continue", "workstation"],
-      },
-      {
-        topic: "test-topic",
-        title: "⏳ Pi Waiting · workstation · /work/project",
-        message: "300s · Waiting for CI — 请稍候\nsession id: session-wait",
-        tags: ["waiting", "workstation"],
       },
     ]);
   } finally {
@@ -236,7 +218,6 @@ test("ntfy companion maps automatic user-ready outcomes without conflating reaso
       ["AI_UNLOCK", "JOB_BLOCKED", "🚧 Pi Blocked · workstation · /work/project", "blocked", "The required service is unavailable."],
       ["ERROR_UNLOCK", "", "❌ Pi Continue error · workstation · /work/project", "error-unlock", "Continue watchdog unlocked · run ended in error (automatic unlock)"],
       ["EXHAUSTED", "", "🛑 Pi Continue stopped · workstation · /work/project", "retry-limit", "Continue watchdog retry limit reached"],
-      ["DECISION_FAILED", "", "⚠️ Pi Continue failed · workstation · /work/project", "decision-failed", "Continue watchdog decision failed"],
     ] as const;
     for (const [stopKind, reasonType, title, tag, reason] of cases) {
       const values: Record<string, string> = {
@@ -317,10 +298,6 @@ test("ntfy companion stays silent for incomplete or invalid presentations", asyn
   try {
     const cases: Array<[string[], Record<string, string>, string?]> = [
       ["agent".split(" "), { PI_NOTIFY_TITLE: "title" }],
-      ["wait".split(" "), { PI_NOTIFY_REASON: "reason", PI_NOTIFY_WAIT_SECONDS: "0" }],
-      ["wait".split(" "), { PI_NOTIFY_REASON: "reason", PI_NOTIFY_WAIT_SECONDS: "1.5" }],
-      ["wait".split(" "), { PI_NOTIFY_REASON: "reason", PI_NOTIFY_WAIT_SECONDS: "1801" }],
-      ["wait".split(" "), { PI_NOTIFY_REASON: "reason", PI_NOTIFY_WAIT_SECONDS: "9".repeat(100) }],
       ["reflect".split(" "), { PI_NOTIFY_REFLECTION_TYPE: "NO_ISSUE", PI_NOTIFY_REASON: "reason" }],
       ["reflect".split(" "), { PI_NOTIFY_REFLECTION_TYPE: "FUTURE_REVIEW", PI_NOTIFY_REASON: "reason", PI_NOTIFY_NEXT_STEP: "next" }],
       ["user-ready".split(" "), { PI_NOTIFY_STOP_KIND: "AI_UNLOCK", PI_NOTIFY_REASON: "reason", PI_NOTIFY_REASON_TYPE: "UNKNOWN" }],
@@ -331,6 +308,40 @@ test("ntfy companion stays silent for incomplete or invalid presentations", asyn
       const result = await runHelper(args, isolatedEnv(fixture.endpoint, values), input);
       assert.equal(result.status, 0, result.stderr);
     }
+    assert.equal(fixture.requests.length, 0);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("ntfy companion exits with usage for removed wait mode and stays silent for removed stop kind", async () => {
+  const fixture = await startServer();
+  try {
+    // Removed producer outputs: wait mode is unsupported (usage exit 2),
+    // DECISION_FAILED is an unknown stop kind (silent exit 0).
+    const waitResult = await runHelper(
+      ["wait"],
+      isolatedEnv(fixture.endpoint, {
+        PI_NOTIFY_REASON: "reason",
+        PI_NOTIFY_WAIT_SECONDS: "60",
+        PI_NOTIFY_HOSTNAME: "workstation",
+        PI_NOTIFY_CWD: "/work/project",
+        PI_NOTIFY_SESSION_ID: "session-wait",
+      }),
+    );
+    assert.equal(waitResult.status, 2);
+    assert.match(waitResult.stderr, /^Usage: pi-notify-ntfy\.mjs /m);
+
+    const failedResult = await runHelper(
+      ["user-ready"],
+      isolatedEnv(fixture.endpoint, {
+        PI_NOTIFY_STOP_KIND: "DECISION_FAILED",
+        PI_NOTIFY_HOSTNAME: "workstation",
+        PI_NOTIFY_CWD: "/work/project",
+        PI_NOTIFY_SESSION_ID: "session-failed",
+      }),
+    );
+    assert.equal(failedResult.status, 0, failedResult.stderr);
     assert.equal(fixture.requests.length, 0);
   } finally {
     await fixture.close();

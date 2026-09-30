@@ -112,24 +112,12 @@ or:
   "version": 1,
   "name": "user-ready",
   "values": {
-    "STOP_KIND": "DECISION_FAILED"
-  }
-}
-```
-
-or:
-
-```json
-{
-  "version": 1,
-  "name": "user-ready",
-  "values": {
     "STOP_KIND": "ERROR_UNLOCK"
   }
 }
 ```
 
-AI decision unlock uses the producer's existing validated reason. Human unlock and user/manual abort are intentionally silent. `ERROR_UNLOCK` is the terminal-error automatic unlock (`Continue watchdog unlocked · run ended in error (automatic unlock)`); consumers map it to a red-cross title such as `❌ Pi Continue error`. Continue also publishes `watchdog-continued` with `REASON_TYPE`/`REASON` and `watchdog-waiting` with `REASON`/decimal-string `WAIT_SECONDS` (no `REASON_TYPE`). Intermediate, cancelled, stale, invalid, and human-owned states remain silent; consumer must not infer them.
+AI unlock uses the producer's existing validated reason: the model calls the `unlock_continue_watchdog` tool with a reason type and reason. Human unlock and user/manual abort are intentionally silent. `ERROR_UNLOCK` is the terminal-error automatic unlock (`Continue watchdog unlocked · run ended in error (automatic unlock)`); consumers map it to a red-cross title such as `❌ Pi Continue error`. Continue also publishes `watchdog-continued` with no values once per automatic continuation. Intermediate, cancelled, stale, invalid, and human-owned states remain silent; consumer must not infer them.
 
 `pi-reflect-watchdog` independently publishes `reflection-completed` with `REFLECTION_TYPE`, `REASON`, and `NEXT_STEP`; current types are `NO_ISSUE` and `ROUTE_CORRECTION`. Producer clips hook fields over 4096 UTF-16 code units while durable report keeps full values, and publishes only after durable completion.
 
@@ -142,7 +130,7 @@ Public integration and backend recipes:
 - [`ntfy helper`](../../example/pi-notify-ntfy.md)
 - [`Bark helper`](../../example/pi-notify-bark.md)
 
-Both helpers support `question`, `agent`, `continue`, `wait`, `reflect`, and `user-ready`. They are copied owner-only, use `NTFY_URL` or `BARK_URL` + `BARK_DEVICE_KEY`, read question content from stdin, and are independently composable through separate `cmd:"$HOME/..."` actions. Verify with loopback fixtures only.
+Both helpers support `question`, `agent`, `continue`, `reflect`, and `user-ready`. They are copied owner-only, use `NTFY_URL` or `BARK_URL` + `BARK_DEVICE_KEY`, read question content from stdin, and are independently composable through separate `cmd:"$HOME/..."` actions. Verify with loopback fixtures only.
 
 ## pi-notify Consumer Configuration
 
@@ -225,8 +213,6 @@ if (kind === "AI_UNLOCK") {
   notification.osc("Pi", notification.values.REASON);
 } else if (kind === "EXHAUSTED") {
   notification.osc("Pi", "Continue watchdog exhausted");
-} else if (kind === "DECISION_FAILED") {
-  notification.osc("Pi", "Continue watchdog decision failed");
 }
 ```
 
