@@ -51,7 +51,8 @@ Prefer declarative `bel`, templated `osc:`, and `shell:` tuples. Use `js:` only 
 ### Shared binding rules
 
 - `delayMs` defaults to `0` (nonnegative safe integer within the Node timer maximum).
-- Flow: retain causal data → wait `delayMs` → collect live cwd/session/env → execute.
+- Optional `if`: trusted JS expression; falsy skips all actions (see [Binding condition](#binding-condition-if)).
+- Flow: retain causal data → wait `delayMs` → collect live cwd/session/env → check `if` → execute.
 - No debounce, dedup, or latest-event replacement. Reload / `session_shutdown` cancels pending work.
 - Global config + trusted project config; matching bindings replace as whole units.
 - Explicit `"actions": []` disables that binding.
@@ -207,6 +208,19 @@ Validated producer values become additional templates and `PI_NOTIFY_*` entries 
 
 Bare `osc` is valid only for lifecycle events (built-in default copy). Hook bindings reject bare `osc`; use `osc:<title>|<body>` or `notification.osc` in `js:`. Bare `bel` is valid for both because it has no text payload.
 
+### Binding condition (`if`)
+
+Any binding may set `if` to a trusted JavaScript expression. It is evaluated once per received event or hook, after `delayMs` and before the first action, with the same `pi`, `ctx`, `event`, and `notification` scope as `js:` (`await` is allowed). A falsy result skips every action of the binding, so shortcuts like `bel`, `osc:`, and `cmd:` stay declarative:
+
+```json
+"user-ready": {
+  "if": "notification.values.REASON_TYPE !== 'WAIT_CALLBACK'",
+  "actions": ["bel", "cmd:\"$HOME/.pi/agent/pi-notify-delivery.mjs\" user-ready"]
+}
+```
+
+If the expression throws, pi-notify warns and skips the actions. A non-string or blank `if` invalidates that binding; the lower-precedence binding stays in effect. Like `js:`, `if` is executable code.
+
 ### Binding delay
 
 Every received event or hook schedules its own independent timer:
@@ -215,7 +229,8 @@ Every received event or hook schedules its own independent timer:
 2. Wait `delayMs`.
 3. Verify the consumer generation is still current.
 4. Collect live cwd/session fields, a currently valid public `ExtensionContext`, and the inherited process environment.
-5. Construct `PI_NOTIFY_*`, render templates, and execute actions.
+5. Evaluate the optional `if`; stop here when it is falsy or throws.
+6. Construct `PI_NOTIFY_*`, render templates, and execute actions.
 
 There is no debounce, replacement, coalescing, or revalidation against new activity. Reload / `session_shutdown` unsubscribes, cancels pending timers, and advances generation so late work cannot cause side effects.
 

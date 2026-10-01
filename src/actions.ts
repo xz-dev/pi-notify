@@ -32,6 +32,8 @@ export interface ActionRuntime {
   resolvePowerShell?: () => string | undefined;
   platform?: NodeJS.Platform;
   runJs?: (code: string, scope: JsActionScope) => Promise<void>;
+  /** Evaluate a binding `if` expression; defaults to trusted in-process JS. */
+  evaluateCondition?: (expression: string, scope: JsActionScope) => Promise<unknown>;
   warn: (message: string) => void;
 }
 
@@ -56,6 +58,8 @@ export interface RunActionsOptions {
   defaultOsc?: { title: string; body: string };
   /** Optional generation gate checked before side effects (including notification.osc). */
   isCurrent?: () => boolean;
+  /** Binding `if` expression; a falsy result or a throw skips every action. */
+  condition?: string;
   /** Reports each configured action failure to the originating consumer context. */
   onActionFailure?: (label: string, error: unknown) => void;
 }
@@ -74,6 +78,22 @@ function defaultRunJs(code: string, scope: JsActionScope): Promise<void> {
     notification: JsNotificationContext,
   ) => Promise<unknown>;
   return Promise.resolve(runner(scope.pi, scope.ctx, scope.event, scope.notification)).then(() => undefined);
+}
+
+function defaultEvaluateCondition(expression: string, scope: JsActionScope): Promise<unknown> {
+  const evaluate = new Function(
+    "pi",
+    "ctx",
+    "event",
+    "notification",
+    `"use strict"; return (async () => (${expression}\n))();`,
+  ) as (
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    event: unknown,
+    notification: JsNotificationContext,
+  ) => Promise<unknown>;
+  return Promise.resolve(evaluate(scope.pi, scope.ctx, scope.event, scope.notification));
 }
 
 function parseOscAction(
@@ -173,6 +193,24 @@ export async function runActions(options: RunActionsOptions): Promise<void> {
     };
   };
   const jsNotification = buildJsNotification(notification, runtime, failures, createObserver, isCurrent);
+
+  if (options.condition !== undefined) {
+    let pass: unknown;
+    try {
+      pass = await (runtime.evaluateCondition ?? defaultEvaluateCondition)(options.condition, {
+        pi: options.pi,
+        ctx: options.ctx,
+        event: options.event,
+        notification: jsNotification,
+      });
+    } catch (error) {
+      if (isCurrent && !isCurrent()) return;
+      const message = error instanceof Error ? error.message : String(error);
+      runtime.warn(`Notification condition failed (${options.key}); skipping actions: ${message}`);
+      return;
+    }
+    if (!pass || (isCurrent && !isCurrent())) return;
+  }
 
   for (const action of actions) {
     if (isCurrent && !isCurrent()) return;

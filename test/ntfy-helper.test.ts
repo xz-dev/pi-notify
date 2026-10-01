@@ -301,6 +301,7 @@ test("ntfy companion stays silent for incomplete or invalid presentations", asyn
       ["reflect".split(" "), { PI_NOTIFY_REFLECTION_TYPE: "NO_ISSUE", PI_NOTIFY_REASON: "reason" }],
       ["reflect".split(" "), { PI_NOTIFY_REFLECTION_TYPE: "FUTURE_REVIEW", PI_NOTIFY_REASON: "reason", PI_NOTIFY_NEXT_STEP: "next" }],
       ["user-ready".split(" "), { PI_NOTIFY_STOP_KIND: "AI_UNLOCK", PI_NOTIFY_REASON: "reason", PI_NOTIFY_REASON_TYPE: "UNKNOWN" }],
+      ["user-ready".split(" "), { PI_NOTIFY_STOP_KIND: "AI_UNLOCK", PI_NOTIFY_REASON: "reason", PI_NOTIFY_REASON_TYPE: "WAIT_CALLBACK" }],
       ["user-ready".split(" "), { PI_NOTIFY_STOP_KIND: "NOT_AUTOMATIC" }],
       ["question".split(" "), {}, ""],
     ];

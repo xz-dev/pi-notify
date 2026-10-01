@@ -202,6 +202,7 @@ test("Bark companion stays silent for unsupported reflection types and user-read
     for (const values of [
       { PI_NOTIFY_REFLECTION_TYPE: "FUTURE_REVIEW", PI_NOTIFY_REASON: "reason", PI_NOTIFY_NEXT_STEP: "next" },
       { PI_NOTIFY_STOP_KIND: "AI_UNLOCK", PI_NOTIFY_REASON_TYPE: "UNKNOWN", PI_NOTIFY_REASON: "reason" },
+      { PI_NOTIFY_STOP_KIND: "AI_UNLOCK", PI_NOTIFY_REASON_TYPE: "WAIT_CALLBACK", PI_NOTIFY_REASON: "reason" },
       { PI_NOTIFY_STOP_KIND: "AI_UNLOCK", PI_NOTIFY_REASON: "reason" },
     ] as Array<Record<string, string>>) {
       const result = await runHelper([values.PI_NOTIFY_REFLECTION_TYPE ? "reflect" : "user-ready"], isolatedEnv(fixture.endpoint, values));

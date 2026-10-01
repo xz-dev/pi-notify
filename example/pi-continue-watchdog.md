@@ -24,7 +24,7 @@ Example continue envelope:
 
 ## Notification presentation
 
-Helpers append `session id: <SESSION_ID>` to body. Continue uses `▶️ Pi Continue` and the fixed message `Continue watchdog continued`. Automatic user-ready uses producer-owned reason mapping: `✅ Pi Done` (`JOB_DONE`), `🙋 Pi Wait` (`WAIT_USER`), `🚧 Pi Blocked` (`JOB_BLOCKED`), `❌ Pi Continue error` (`ERROR_UNLOCK`), or `🛑 Pi Continue stopped` (`EXHAUSTED`).
+Helpers append `session id: <SESSION_ID>` to body. Continue uses `▶️ Pi Continue` and the fixed message `Continue watchdog continued`. Automatic user-ready uses producer-owned reason mapping: `✅ Pi Done` (`JOB_DONE`), `🙋 Pi Wait` (`WAIT_USER`), `🚧 Pi Blocked` (`JOB_BLOCKED`), nothing for `WAIT_CALLBACK`, `❌ Pi Continue error` (`ERROR_UNLOCK`), or `🛑 Pi Continue stopped` (`EXHAUSTED`).
 
 ## Install
 
@@ -61,6 +61,7 @@ Use separate `cmd:` actions. `$HOME` is expanded by platform shell; helpers rece
     },
     "user-ready": {
       "delayMs": 0,
+      "if": "notification.values.REASON_TYPE !== 'WAIT_CALLBACK'",
       "actions": [
         "bel",
         "cmd:\"$HOME/.pi/agent/pi-notify-ntfy.mjs\" user-ready",
@@ -71,7 +72,7 @@ Use separate `cmd:` actions. `$HOME` is expanded by platform shell; helpers rece
 }
 ```
 
-For ntfy-only or Bark-only, remove other helper action. A helper failure is independent; pi-notify still attempts later actions. Do not use `$HOME` in direct-argv `shell:` tuples.
+`WAIT_CALLBACK` means the agent stopped to wait for another agent or program to call back, so nobody needs to look. The binding `if` keeps every action silent for it, including `bel`; the helpers also ignore reason types they do not map. For ntfy-only or Bark-only, remove other helper action. A helper failure is independent; pi-notify still attempts later actions. Do not use `$HOME` in direct-argv `shell:` tuples.
 
 ## Verify without real network
 

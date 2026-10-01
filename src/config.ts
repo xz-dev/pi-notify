@@ -189,10 +189,27 @@ function parseBinding(
     }
   }
 
+  let condition: string | undefined;
+  if (Object.hasOwn(value, "if")) {
+    const ifProp = readOwnDataProperty(value, "if");
+    if (
+      !ifProp.ok ||
+      typeof ifProp.value !== "string" ||
+      ifProp.value.trim().length === 0 ||
+      ifProp.value.length > MAX_ACTION_TEXT_LENGTH
+    ) {
+      options.warn(
+        `Ignoring ${bindingLabel} in ${pathLabel}: if must be a non-empty JavaScript expression string of at most ${MAX_ACTION_TEXT_LENGTH} characters`,
+      );
+      return undefined;
+    }
+    condition = ifProp.value;
+  }
+
   const actions = parseActions(actionsProp.value, pathLabel, bindingLabel, options);
   if (actions === undefined) return undefined;
 
-  return { delayMs, actions };
+  return condition === undefined ? { delayMs, actions } : { delayMs, if: condition, actions };
 }
 
 interface ParsedFile {

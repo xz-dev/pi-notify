@@ -40,7 +40,7 @@ Both public helpers support `question`, `agent`, `continue`, `reflect`, and `use
 | `agent` | `TITLE`, `CONTENT` | `🤖 TITLE · HOSTNAME · CWD` |
 | `continue` | none | `▶️ Pi Continue`; fixed `Continue watchdog continued` message |
 | `reflect` | `REFLECTION_TYPE`, `REASON`, `NEXT_STEP` | fixed clear/route-correction reflection title |
-| `user-ready` | `STOP_KIND`; AI unlock also `REASON_TYPE`, `REASON` | done/wait/blocked, terminal-error, or exhausted |
+| `user-ready` | `STOP_KIND`; AI unlock also `REASON_TYPE`, `REASON` | done/wait/blocked, terminal-error, or exhausted; other reason types such as `WAIT_CALLBACK` send nothing |
 
 Question text is read from that invocation's stdin, never `PI_NOTIFY_QUESTION_BODY` or a temporary file. Multiline and Unicode bodies are preserved; metadata is cleaned for safe single-line headers. Missing fields, unsupported modes, and incomplete presentations exit silently without a request. Unsupported modes exit with usage status 2. Requests use a finite 15-second timeout.
 

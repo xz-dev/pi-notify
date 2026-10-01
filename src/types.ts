@@ -18,6 +18,8 @@ export type NotificationAction =
 
 export interface NotificationBinding {
   delayMs: number;
+  /** Optional trusted JS expression; a falsy result skips every action. */
+  if?: string;
   actions: NotificationAction[];
 }
 

@@ -838,3 +838,78 @@ test("TITLE and CONTENT templates render only when provided", () => {
 test("semantic channel constant is stable", () => {
   assert.equal(SEMANTIC_HOOK_CHANNEL, "pi:semantic-hook:v1");
 });
+
+test("binding if gates every action, including bel and cmd shortcuts", async () => {
+  const { agentDir, cwd } = await fixture();
+  await writeFile(
+    join(agentDir, "pi-notify.json"),
+    JSON.stringify({
+      hooks: {
+        "user-ready": {
+          if: "notification.values.REASON_TYPE !== 'WAIT_CALLBACK'",
+          actions: ["bel", "cmd:delivered ${PI_NOTIFY_REASON_TYPE}"],
+        },
+        "async-check": { if: "await Promise.resolve(event.values.GO === 'yes')", actions: ["cmd:async-ok"] },
+        "throws": { if: "missingVariable.value", actions: ["bel"] },
+      },
+    }),
+  );
+
+  const { handlers, pi } = createPiHarness();
+  const launches: string[] = [];
+  const warnings: string[] = [];
+  registerExtension(pi, {
+    agentDir,
+    launchBel: () => launches.push("bel"),
+    launchOsc: () => undefined,
+    launchCommand: (command, _cwd, environment) =>
+      launches.push(command.replace("${PI_NOTIFY_REASON_TYPE}", environment.PI_NOTIFY_REASON_TYPE ?? "")),
+    launchShell: () => undefined,
+    warn: (message) => warnings.push(message),
+  });
+  await handlers.get("session_start")?.({ type: "session_start" }, makeCtx(cwd));
+
+  const emit = (name: string, values: Record<string, string>) =>
+    pi.events.emit(SEMANTIC_HOOK_CHANNEL, { version: 1, name, values });
+  emit("user-ready", { STOP_KIND: "AI_UNLOCK", REASON_TYPE: "WAIT_CALLBACK", REASON: "waiting on subagent" });
+  await flush();
+  assert.deepEqual(launches, []);
+
+  emit("user-ready", { STOP_KIND: "AI_UNLOCK", REASON_TYPE: "JOB_DONE", REASON: "done" });
+  await flush();
+  assert.deepEqual(launches, ["bel", "delivered JOB_DONE"]);
+
+  launches.length = 0;
+  emit("async-check", { GO: "no" });
+  await flush();
+  emit("async-check", { GO: "yes" });
+  await flush();
+  assert.deepEqual(launches, ["async-ok"]);
+
+  launches.length = 0;
+  emit("throws", {});
+  await flush();
+  assert.deepEqual(launches, []);
+  assert.ok(warnings.some((message) => message.includes("Notification condition failed (hook:throws)")));
+});
+
+test("invalid binding if rejects the binding and keeps the lower-precedence one", async () => {
+  const { agentDir, cwd } = await fixture();
+  await writeFile(join(agentDir, "pi-notify.json"), JSON.stringify({ hooks: { "user-ready": { actions: ["bel"] } } }));
+  for (const bad of ["", "   ", 42, true]) {
+    await writeFile(
+      join(cwd, ".pi", "pi-notify.json"),
+      JSON.stringify({ hooks: { "user-ready": { if: bad, actions: ["cmd:project"] } } }),
+    );
+    const warnings: string[] = [];
+    const config = await loadConfig({ agentDir, cwd, projectTrusted: true, warn: (m) => warnings.push(m) });
+    assert.deepEqual(config.hooks["user-ready"], { delayMs: 0, actions: ["bel"] }, JSON.stringify(bad));
+    assert.ok(warnings.some((message) => message.includes("if must be a non-empty JavaScript expression")));
+  }
+  await writeFile(
+    join(cwd, ".pi", "pi-notify.json"),
+    JSON.stringify({ hooks: { "user-ready": { if: "true", actions: ["cmd:project"] } } }),
+  );
+  const config = await loadConfig({ agentDir, cwd, projectTrusted: true, warn: () => undefined });
+  assert.deepEqual(config.hooks["user-ready"], { delayMs: 0, if: "true", actions: ["cmd:project"] });
+});

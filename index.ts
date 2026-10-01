@@ -68,6 +68,7 @@ export interface NotificationRuntime {
   resolvePowerShell?: () => string | undefined;
   platform?: NodeJS.Platform;
   runJs?: (code: string, scope: JsActionScope) => Promise<void>;
+  evaluateCondition?: (expression: string, scope: JsActionScope) => Promise<unknown>;
   warn: (message: string) => void;
   scheduler?: Scheduler;
 }
@@ -116,6 +117,7 @@ function toActionRuntime(runtime: NotificationRuntime): ActionRuntime {
     resolvePowerShell: runtime.resolvePowerShell,
     platform: runtime.platform,
     runJs: runtime.runJs,
+    evaluateCondition: runtime.evaluateCondition,
     warn: runtime.warn,
   };
 }
@@ -213,6 +215,7 @@ export default function registerExtension(pi: ExtensionAPI, runtime: Notificatio
 
   function scheduleBinding(options: {
     delayMs: number;
+    condition?: string;
     actions: NotificationAction[];
     key: string;
     defaultOsc?: { title: string; body: string };
@@ -238,6 +241,7 @@ export default function registerExtension(pi: ExtensionAPI, runtime: Notificatio
         await runActions({
           key,
           actions,
+          condition: options.condition,
           pi,
           ctx: liveCtx,
           event: causalEvent,
@@ -319,6 +323,7 @@ export default function registerExtension(pi: ExtensionAPI, runtime: Notificatio
 
       scheduleBinding({
         delayMs: binding.delayMs,
+        condition: binding.if,
         actions: binding.actions,
         key,
         defaultOsc: LIFECYCLE_DEFAULT_OSC[key],
@@ -354,6 +359,7 @@ export default function registerExtension(pi: ExtensionAPI, runtime: Notificatio
       const values = copyProducerValues(envelope.values);
       scheduleBinding({
         delayMs: binding.delayMs,
+        condition: binding.if,
         actions: binding.actions,
         key: `hook:${envelope.name}`,
         causalEvent: {
