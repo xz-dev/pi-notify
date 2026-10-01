@@ -19,6 +19,6 @@
 
 ## 4. Validation and review
 
-- [ ] 4.1 Run syntax/config/link/secret scans over public examples and confirm no private URL, topic, device key, authorization data, production payload, or live-file change is present.
-- [ ] 4.2 Run focused helper and skill tests, full test suite, and typecheck with real backend access disabled; verify all pass without modifying producer repositories, dependencies, Dotdrop files, live configuration, or retained deployment evidence.
-- [ ] 4.3 Validate `refresh-notification-integration-examples` with `openspec validate --strict` and review final diff for scope, portability, backwards-compatible paths, and documentation-to-contract consistency.
+- [x] 4.1 Run syntax/config/link/secret scans over public examples and confirm no private URL, topic, device key, authorization data, production payload, or live-file change is present.
+- [x] 4.2 Run focused helper and skill tests, full test suite, and typecheck with real backend access disabled; verify all pass without modifying producer repositories, dependencies, Dotdrop files, live configuration, or retained deployment evidence.
+- [x] 4.3 Validate `refresh-notification-integration-examples` with `openspec validate --strict` and review final diff for scope, portability, backwards-compatible paths, and documentation-to-contract consistency.
