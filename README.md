@@ -335,6 +335,7 @@ Standalone backend helpers:
 
 - [`ntfy` helper and contract](./example/pi-notify-ntfy.md)
 - [`Bark` helper and contract](./example/pi-notify-bark.md)
+- [Herdr popups with tab, pane, and Pi session IDs](./example/pi-notify-herdr.md)
 
 Examples prefer built-in `bel`, templated `osc:`, and direct `cmd:` actions. Use `js:` only when behavior is genuinely conditional. Backend helpers are independently invocable; add separate ntfy and Bark actions to compose both.
 
